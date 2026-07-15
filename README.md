@@ -22,7 +22,16 @@
 * 消息查看：如果需要确认消息可以将这个插件的日志级别改成info可以查看对应消息情况。
 
 ## 版本修订
-当前版本 V2.1.2 常规更新，为当前最稳定版本
+当前版本 V3.0.0，为 AqaraBridge3.0 的首个版本。
+
+V3.0.0
+* 项目仓库迁移至 `princehaku/AqaraBridge3.0`，同步更新 HACS、文档和问题反馈地址。
+* Aqara 云端授权有效期由 7 天调整为 30 天，并在令牌到期前 3 天自动刷新；刷新失败后 1 小时自动重试。
+* 增加并发刷新锁和令牌失效自动刷新重试，避免多个请求同时刷新令牌，并改进云端错误日志。
+* 刷新令牌后完整保存新的访问令牌、刷新令牌和有效期；仅在账号、开发者参数或选项变化时重载集成。
+* 优化选项配置页，自动回填国家/地区和当前刷新令牌；可直接刷新授权，或清空刷新令牌后使用验证码重新授权。
+* 新增 `lumi.sensor_ht.agl001` 温度、湿度和电量传感器支持。
+* 兼容 `environment_temperature`、`environment_humidity` 资源及小数形式的温湿度和电量数据。
 
 V2.1.2
 * 优化初始化向导提示
@@ -203,4 +212,3 @@ V1.0.0
 
 还有我只支持了大部分我有的设备和类似的组件，如果发现有不支持的懂python的修改：
 [custom_components/aqara_bridge/core/aiot_mapping.py](https://github.com/princehaku/AqaraBridge3.0/blob/master/custom_components/aqara_bridge/core/aiot_mapping.py)
-
