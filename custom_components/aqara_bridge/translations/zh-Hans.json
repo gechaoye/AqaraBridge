@@ -41,9 +41,9 @@
                     "field_app_id": "开放平台app_id，需自行申请",
                     "field_app_key": "开放平台app_key，需自行申请",
                     "field_key_id": "开放平台key_id，需自行申请",
-                    "field_refresh_token": "刷新令牌（开发用）"
+                    "field_refresh_token": "刷新令牌（当前值）"
                 },
-                "description": "使用在Aqara Home注册的账号进行登录。",
+                "description": "当前刷新令牌会自动回填；直接提交可刷新访问令牌。清空刷新令牌后提交，则通过验证码重新授权。",
                 "title": "选项"
             },
             "option_get_token": {

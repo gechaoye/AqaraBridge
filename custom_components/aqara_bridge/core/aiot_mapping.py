@@ -1870,6 +1870,55 @@ AIOT_DEVICE_MAPPING = [
         ],
     },
     ###############################传感器###########################################
+    ###温湿度控制面板
+    {
+        "lumi.sensor_ht.agl001": ["Aqara", "TH Sensor AGL001", ""],
+        "params": [
+            {
+                "sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "temperature",
+                        "device_class": SensorDeviceClass.TEMPERATURE,
+                        "state_class": SensorStateClass.MEASUREMENT,
+                        "unit_of_measurement": UnitOfTemperature.CELSIUS,
+                    },
+                    MK_RESOURCES: {
+                        "environment_temperature": (
+                            "0.1.85",
+                            "_attr_native_value",
+                        )
+                    },
+                }
+            },
+            {
+                "sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "humidity",
+                        "device_class": SensorDeviceClass.HUMIDITY,
+                        "state_class": SensorStateClass.MEASUREMENT,
+                        "unit_of_measurement": PERCENTAGE,
+                    },
+                    MK_RESOURCES: {
+                        "environment_humidity": (
+                            "0.2.85",
+                            "_attr_native_value",
+                        )
+                    },
+                }
+            },
+            {
+                "sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "battery",
+                        "device_class": SensorDeviceClass.BATTERY,
+                        "state_class": SensorStateClass.MEASUREMENT,
+                        "unit_of_measurement": PERCENTAGE,
+                    },
+                    MK_RESOURCES: {"battery": ("8.0.2001", "_attr_native_value")},
+                }
+            },
+        ],
+    },
     ###温湿度
     {
         # 小米温湿度传感器

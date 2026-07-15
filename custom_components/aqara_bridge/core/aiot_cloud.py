@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import random
@@ -8,6 +9,10 @@ import logging
 from aiohttp import ClientSession
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class AqaraCloudAPIError(RuntimeError):
+    """Raised when Aqara Cloud rejects a request after token refresh retry."""
 
 API_DOMAIN = {
     "CN": "open-cn.aqara.com",
@@ -52,6 +57,7 @@ class AiotCloud:
         self.app_key = None
         self.session = session
         self.options = None
+        self._refresh_lock = asyncio.Lock()
         self.set_country("CN")
 
     def set_options(self, options):
@@ -120,6 +126,7 @@ class AiotCloud:
                 if list_data
                 else {"intent": intent, "data": kwargs}
             )
+            request_access_token = self.access_token
             r = await self.session.post(
                 url=self.api_url,
                 data=json.dumps(payload),
@@ -133,13 +140,19 @@ class AiotCloud:
                 if jo["code"] != 0:
                     # 调用Aiot api失败，返回值
                     _LOGGER.warning(
-                        f"Call Aiot api failed，request:{payload},return:{jo}"
+                        "Call Aiot api failed, intent:%s, code:%s, message:%s",
+                        intent,
+                        jo.get("code"),
+                        jo.get("message"),
                     )
                     if jo["code"] == 108:
                         # 令牌过期或异常，正在尝试自动刷新
                         _LOGGER.warning(f"Aiot token expired, trying to auto refresh！")
-                        new_jo = await self.async_refresh_token(self.refresh_token)
-                        if new_jo["code"] == 0:
+                        new_jo = await self.async_refresh_token(
+                            self.refresh_token,
+                            expected_access_token=request_access_token,
+                        )
+                        if isinstance(new_jo, dict) and new_jo.get("code") == 0:
                             # Aiot令牌更新成功！
                             _LOGGER.info(f"Aiot token refresh successfully！")
                             return await self._async_invoke_aqara_cloud_api(
@@ -150,15 +163,23 @@ class AiotCloud:
                             _LOGGER.error(
                                 "Aiot token refresh failed, please do authorization again！"
                             )
+                    raise AqaraCloudAPIError(
+                        "Aqara cloud API failed after refresh retry: "
+                        f"intent={intent}, code={jo.get('code')}, "
+                        f"message={jo.get('message')}"
+                    )
                 return jo.get("result")
-            else:
-                return jo
 
+            return jo
+
+        except AqaraCloudAPIError as ex:
+            _LOGGER.error(ex)
+            raise
         except Exception as ex:
             _LOGGER.error(ex)
 
     async def async_get_auth_code(
-        self, account: str, account_type: int, access_token_validity: str = "7d"
+        self, account: str, account_type: int, access_token_validity: str = "30d"
     ):
         """获取授权验证码"""
         return await self._async_invoke_aqara_cloud_api(
@@ -179,30 +200,44 @@ class AiotCloud:
             accountType=account_type,
         )
         if jo["code"] == 0:
-            self.access_token = jo["result"]["accessToken"]
-            self.refresh_token = jo["result"]["refreshToken"]
+            token_result = jo["result"]
+            self.access_token = token_result["accessToken"]
+            self.refresh_token = token_result["refreshToken"]
             if self.update_token_event_callback:
-                self.update_token_event_callback(self.access_token, self.refresh_token)
+                self.update_token_event_callback(token_result)
 
         return jo
 
-    async def async_refresh_token(self, refresh_token: str):
+    async def async_refresh_token(
+        self, refresh_token: str, expected_access_token: str = None
+    ):
         """刷新访问令牌"""
-        jo = await self._async_invoke_aqara_cloud_api(
-            intent="config.auth.refreshToken",
-            only_result=False,
-            refreshToken=refresh_token,
-        )
-        if jo["code"] == 0:
-            self.access_token = jo["result"]["accessToken"]
-            self.refresh_token = jo["result"]["refreshToken"]
-            if self.update_token_event_callback:
-                self.update_token_event_callback(self.access_token, self.refresh_token)
-        else:
-            _LOGGER.error(
-                f"Call Aiot api refresh token failed，request:{refresh_token},return:{jo}"
+        async with self._refresh_lock:
+            if (
+                expected_access_token is not None
+                and self.access_token != expected_access_token
+            ):
+                # Another request already refreshed the token while this one waited.
+                return {"code": 0, "result": {}}
+
+            jo = await self._async_invoke_aqara_cloud_api(
+                intent="config.auth.refreshToken",
+                only_result=False,
+                refreshToken=refresh_token,
             )
-        return jo
+            if jo["code"] == 0:
+                token_result = jo["result"]
+                self.access_token = token_result["accessToken"]
+                self.refresh_token = token_result["refreshToken"]
+                if self.update_token_event_callback:
+                    self.update_token_event_callback(token_result)
+            else:
+                _LOGGER.error(
+                    "Call Aiot api refresh token failed, code:%s, message:%s",
+                    jo.get("code"),
+                    jo.get("message"),
+                )
+            return jo
 
     async def async_query_device_bind_key(self, did: str):
         """获取设备入网bindKey"""

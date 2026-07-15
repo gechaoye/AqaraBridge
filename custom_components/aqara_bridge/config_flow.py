@@ -233,7 +233,7 @@ class OptionsFlowHandler(OptionsFlow):
                     vol.Required(
                         CONF_FIELD_COUNTRY_CODE,
                         default=prev_input.get(
-                            SERVER_COUNTRY_CODES_DEFAULT, vol.UNDEFINED
+                            CONF_ENTRY_AUTH_COUNTRY_CODE, SERVER_COUNTRY_CODES_DEFAULT
                         ),
                     ): vol.In(SERVER_COUNTRY_CODES),
                     vol.Optional(
@@ -248,7 +248,12 @@ class OptionsFlowHandler(OptionsFlow):
                         CONF_FIELD_KEY_ID,
                         default=prev_input.get(CONF_ENTRY_KEY_ID, vol.UNDEFINED),
                     ): str,
-                    vol.Optional(CONF_FIELD_REFRESH_TOKEN): str,
+                    vol.Optional(
+                        CONF_FIELD_REFRESH_TOKEN,
+                        default=prev_input.get(
+                            CONF_ENTRY_AUTH_REFRESH_TOKEN, vol.UNDEFINED
+                        ),
+                    ): str,
                 }
             )
             return self.async_show_form(

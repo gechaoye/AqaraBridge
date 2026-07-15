@@ -2,17 +2,17 @@
 
 基于Aqara开放平台，通过云端api进行设备控制以及订阅
 
-[![version](https://img.shields.io/github/manifest-json/v/bernard3378/AqaraBridge?filename=custom_components%2Faqara_bridge%2Fmanifest.json)](https://github.com/bernard3378/AqaraBridge/releases/latest) [![stars](https://img.shields.io/github/stars/bernard3378/AqaraBridge)](https://github.com/bernard3378/AqaraBridge/stargazers) [![issues](https://img.shields.io/github/issues/bernard3378/AqaraBridge)](https://github.com/bernard3378/AqaraBridge/issues) [![hacs](https://img.shields.io/badge/HACS-Default-orange.svg)](https://hacs.xyz)
+[![version](https://img.shields.io/github/manifest-json/v/princehaku/AqaraBridge3.0?filename=custom_components%2Faqara_bridge%2Fmanifest.json)](https://github.com/princehaku/AqaraBridge3.0/releases/latest) [![stars](https://img.shields.io/github/stars/princehaku/AqaraBridge3.0)](https://github.com/princehaku/AqaraBridge3.0/stargazers) [![issues](https://img.shields.io/github/issues/princehaku/AqaraBridge3.0)](https://github.com/princehaku/AqaraBridge3.0/issues) [![hacs](https://img.shields.io/badge/HACS-Default-orange.svg)](https://hacs.xyz)
 
 ## 一键添加到HACS
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bernard3378&repository=AqaraBridge&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=princehaku&repository=AqaraBridge3.0&category=integration)
 ## 需要开发者账号支持
 
 申请AqaraIOT开发者：[Aqara IoT Cloud](https://developer.aqara.com/register).
 
 * 提示：如果在安装过程中出现此集成不支持通过UI配置，大概率是因为rocketmq的链接库不存在，当前版本仅自动集成了x86和arm64。
 * [V2.1.1]已加入更多架构支持，如果还出现类似问题请复制日志信息提Issue
-* 当前支持通过hacs商店进行配置，自定义存储库URL: bernard3378/AqaraBridge
+* 当前支持通过hacs商店进行配置，自定义存储库URL: princehaku/AqaraBridge3.0
 
 重点提示：
 * 需要自己申请aqara的开发者账号。
@@ -202,5 +202,5 @@ V1.0.1
 V1.0.0
 
 还有我只支持了大部分我有的设备和类似的组件，如果发现有不支持的懂python的修改：
-[custom_components/aqara_bridge/core/aiot_mapping.py](https://github.com/meishild/AqaraBridge/blob/master/custom_components/aqara_bridge/core/aiot_mapping.py)
+[custom_components/aqara_bridge/core/aiot_mapping.py](https://github.com/princehaku/AqaraBridge3.0/blob/master/custom_components/aqara_bridge/core/aiot_mapping.py)
 

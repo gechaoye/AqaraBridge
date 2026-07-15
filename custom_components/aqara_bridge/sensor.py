@@ -49,7 +49,8 @@ class AiotSensorEntity(AiotEntityBase, SensorEntity):
 
     def convert_res_to_attr(self, res_name, res_value):
         if res_name == "battery":
-            return int(res_value)
+            value = float(res_value)
+            return int(value) if value.is_integer() else round(value, 1)
         if res_name == "rotation_angle":
             return int(res_value)
         if res_name == "press_rotation_angle":
@@ -60,10 +61,16 @@ class AiotSensorEntity(AiotEntityBase, SensorEntity):
             return round(float(res_value) / 1000.0, 3)
         if res_name == "current":
             return round(float(res_value) * 220.0, 3)
-        if res_name == "temperature":
-            return round(int(res_value) / 100.0, 1)
-        if res_name == "humidity":
-            return round(int(res_value) / 100.0, 1)
+        if res_name in ("temperature", "environment_temperature"):
+            value = float(res_value)
+            if abs(value) > 100:
+                value = value / 100.0
+            return round(value, 1)
+        if res_name in ("humidity", "environment_humidity"):
+            value = float(res_value)
+            if abs(value) > 100:
+                value = value / 100.0
+            return round(value, 1)
         if res_name == "TVOC":
             return int(float(res_value))
         return super().convert_res_to_attr(res_name, res_value)
