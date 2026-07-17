@@ -42,12 +42,12 @@
                 "data": {
                     "field_country_code": "Cloud Server Country/Region",
                     "field_account": "Aqara Home Account (Cellular Number/ Email)",
-                    "field_refresh_token": "Current Refresh Token",
+                    "field_refresh_token": "Refresh Token (optional)",
                     "field_app_id": "Aqara Cloud Develop AppID",
                     "field_app_key": "Aqara Cloud Develop AppKey",
                     "field_key_id": "Aqara Cloud Develop KeyId"
                 },
-                "description": "The current refresh token is prefilled. Submit it to refresh the access token, or clear it to reauthorize with a verification code.",
+                "description": "Leave the refresh token blank to reauthorize with a verification code, or enter a valid refresh token manually.",
                 "title": "Login Aqara Cloud Server"
             },
             "option_get_token": {
@@ -60,6 +60,7 @@
         },
         "error": {
             "refresh_token_error": "Refresh Token invalid",
+            "get_auth_code_error": "Unable to request an SMS or email verification code",
             "auth_code_error": "SMS or Email Code invalid"
         }
     }

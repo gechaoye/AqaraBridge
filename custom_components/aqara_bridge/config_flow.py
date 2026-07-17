@@ -63,10 +63,14 @@ class AqaraBridgeFlowHandler(ConfigFlow, domain=DOMAIN):
             self._session.set_app_key(self.app_key)
             self._session.set_key_id(self.key_id)
 
-            refresh_token = user_input.get(CONF_FIELD_REFRESH_TOKEN)
-            if refresh_token and refresh_token != "":
+            refresh_token = (user_input.get(CONF_FIELD_REFRESH_TOKEN) or "").strip()
+            if refresh_token:
                 resp = await self._session.async_refresh_token(refresh_token)
-                if resp["code"] == 0:
+                if (
+                    isinstance(resp, dict)
+                    and resp.get("code") == 0
+                    and isinstance(resp.get("result"), dict)
+                ):
                     auth_entry = gen_auth_entry(
                         self.app_id,
                         self.app_key,
@@ -86,7 +90,7 @@ class AqaraBridgeFlowHandler(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "refresh_token_error"
             else:
                 resp = await self._session.async_get_auth_code(self.account, 0)
-                if resp["code"] == 0:
+                if isinstance(resp, dict) and resp.get("code") == 0:
                     return await self.async_step_get_token()
                 else:
                     errors["base"] = "auth_code_error"
@@ -141,7 +145,11 @@ class AqaraBridgeFlowHandler(ConfigFlow, domain=DOMAIN):
                 auth_code = user_input.get(CONF_FIELD_AUTH_CODE)
                 resp = await self._session.async_get_token(auth_code, self.account, 0)
 
-                if resp["code"] == 0:
+                if (
+                    isinstance(resp, dict)
+                    and resp.get("code") == 0
+                    and isinstance(resp.get("result"), dict)
+                ):
                     auth_entry = gen_auth_entry(
                         self.app_id,
                         self.app_key,
@@ -156,6 +164,7 @@ class AqaraBridgeFlowHandler(ConfigFlow, domain=DOMAIN):
                             DOMAIN, context={"source": "get_token"}, data=auth_entry
                         )
                     )
+                    return self.async_abort(reason="complete")
                 else:
                     errors["base"] = "get_auth_code_error"
             elif CONF_ENTRY_AUTH_ACCOUNT in user_input:
@@ -163,8 +172,6 @@ class AqaraBridgeFlowHandler(ConfigFlow, domain=DOMAIN):
                     title=data_masking(user_input[CONF_ENTRY_AUTH_ACCOUNT], 4),
                     data=user_input,
                 )
-
-            return self.async_abort(reason="complete")
 
         return self.async_show_form(
             step_id="get_token", data_schema=DEVICE_GET_TOKEN_CONFIG, errors=errors
@@ -182,6 +189,16 @@ class OptionsFlowHandler(OptionsFlow):
     async def async_step_init(self, user_input=None):
         """Configure an aqara device through the Aqara Cloud."""
         errors = {}
+        prev_input = {
+            **self.config_entry.data,
+            **self.config_entry.options,
+        }
+        form_input = (
+            {**prev_input, **user_input}
+            if isinstance(user_input, dict)
+            else prev_input
+        )
+
         if isinstance(user_input, dict):
             # 用户输入
             self.account = user_input.get(CONF_FIELD_ACCOUNT)
@@ -193,11 +210,15 @@ class OptionsFlowHandler(OptionsFlow):
             self._session.set_app_key(user_input.get(CONF_FIELD_APP_KEY))
             self._session.set_key_id(user_input.get(CONF_FIELD_KEY_ID))
 
-            refresh_token = user_input.get(CONF_FIELD_REFRESH_TOKEN)
-            if refresh_token and refresh_token != "":
+            refresh_token = (user_input.get(CONF_FIELD_REFRESH_TOKEN) or "").strip()
+            if refresh_token:
                 # 更新了token值
                 resp = await self._session.async_refresh_token(refresh_token)
-                if resp["code"] == 0:
+                if (
+                    isinstance(resp, dict)
+                    and resp.get("code") == 0
+                    and isinstance(resp.get("result"), dict)
+                ):
                     auth_entry = gen_auth_entry(
                         self._session.get_app_id(),
                         self._session.get_app_key(),
@@ -210,62 +231,60 @@ class OptionsFlowHandler(OptionsFlow):
                     self.hass.config_entries.async_update_entry(
                         self.config_entry, data=auth_entry
                     )
+                    await self.hass.config_entries.async_reload(
+                        self.config_entry.entry_id
+                    )
                     return self.async_abort(reason="complete")
                 else:
                     errors["base"] = "refresh_token_error"
             else:
                 resp = await self._session.async_get_auth_code(self.account, 0)
-                if resp["code"] == 0:
+                if isinstance(resp, dict) and resp.get("code") == 0:
                     return await self.async_step_option_get_token()
                 else:
-                    errors["base"] = "auth_code_error"
-        else:
-            prev_input = {
-                **self.config_entry.data,
-                **self.config_entry.options,
+                    errors["base"] = "get_auth_code_error"
+
+        config_scheme = vol.Schema(
+            {
+                vol.Required(
+                    CONF_FIELD_ACCOUNT,
+                    default=form_input.get(CONF_ENTRY_AUTH_ACCOUNT, vol.UNDEFINED),
+                ): str,
+                vol.Required(
+                    CONF_FIELD_COUNTRY_CODE,
+                    default=form_input.get(
+                        CONF_ENTRY_AUTH_COUNTRY_CODE, SERVER_COUNTRY_CODES_DEFAULT
+                    ),
+                ): vol.In(SERVER_COUNTRY_CODES),
+                vol.Optional(
+                    CONF_FIELD_APP_ID,
+                    default=form_input.get(CONF_ENTRY_APP_ID, vol.UNDEFINED),
+                ): str,
+                vol.Optional(
+                    CONF_FIELD_APP_KEY,
+                    default=form_input.get(CONF_ENTRY_APP_KEY, vol.UNDEFINED),
+                ): str,
+                vol.Optional(
+                    CONF_FIELD_KEY_ID,
+                    default=form_input.get(CONF_ENTRY_KEY_ID, vol.UNDEFINED),
+                ): str,
+                vol.Optional(CONF_FIELD_REFRESH_TOKEN): str,
             }
-            config_scheme = vol.Schema(
-                {
-                    vol.Required(
-                        CONF_FIELD_ACCOUNT,
-                        default=prev_input.get(CONF_ENTRY_AUTH_ACCOUNT, vol.UNDEFINED),
-                    ): str,
-                    vol.Required(
-                        CONF_FIELD_COUNTRY_CODE,
-                        default=prev_input.get(
-                            CONF_ENTRY_AUTH_COUNTRY_CODE, SERVER_COUNTRY_CODES_DEFAULT
-                        ),
-                    ): vol.In(SERVER_COUNTRY_CODES),
-                    vol.Optional(
-                        CONF_FIELD_APP_ID,
-                        default=prev_input.get(CONF_ENTRY_APP_ID, vol.UNDEFINED),
-                    ): str,
-                    vol.Optional(
-                        CONF_FIELD_APP_KEY,
-                        default=prev_input.get(CONF_ENTRY_APP_KEY, vol.UNDEFINED),
-                    ): str,
-                    vol.Optional(
-                        CONF_FIELD_KEY_ID,
-                        default=prev_input.get(CONF_ENTRY_KEY_ID, vol.UNDEFINED),
-                    ): str,
-                    vol.Optional(
-                        CONF_FIELD_REFRESH_TOKEN,
-                        default=prev_input.get(
-                            CONF_ENTRY_AUTH_REFRESH_TOKEN, vol.UNDEFINED
-                        ),
-                    ): str,
-                }
-            )
-            return self.async_show_form(
-                step_id="init", data_schema=config_scheme, errors=errors
-            )
+        )
+        return self.async_show_form(
+            step_id="init", data_schema=config_scheme, errors=errors
+        )
 
     async def async_step_option_get_token(self, user_input=None):
         errors = {}
         if user_input and CONF_FIELD_AUTH_CODE in user_input:
             auth_code = user_input.get(CONF_FIELD_AUTH_CODE)
             resp = await self._session.async_get_token(auth_code, self.account, 0)
-            if resp["code"] == 0:
+            if (
+                isinstance(resp, dict)
+                and resp.get("code") == 0
+                and isinstance(resp.get("result"), dict)
+            ):
                 auth_entry = gen_auth_entry(
                     self._session.get_app_id(),
                     self._session.get_app_key(),
@@ -278,6 +297,7 @@ class OptionsFlowHandler(OptionsFlow):
                 self.hass.config_entries.async_update_entry(
                     self.config_entry, data=auth_entry
                 )
+                await self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 return self.async_abort(reason="complete")
             else:
                 errors["base"] = "auth_code_error"

@@ -41,9 +41,9 @@
                     "field_app_id": "开放平台app_id，需自行申请",
                     "field_app_key": "开放平台app_key，需自行申请",
                     "field_key_id": "开放平台key_id，需自行申请",
-                    "field_refresh_token": "刷新令牌（当前值）"
+                    "field_refresh_token": "刷新令牌（可选）"
                 },
-                "description": "当前刷新令牌会自动回填；直接提交可刷新访问令牌。清空刷新令牌后提交，则通过验证码重新授权。",
+                "description": "刷新令牌留空时通过短信验证码重新授权；也可以手动填写有效的刷新令牌。",
                 "title": "选项"
             },
             "option_get_token": {
@@ -56,6 +56,7 @@
         },
         "error": {
             "refresh_token_error": "刷新令牌错误，无法使用。",
+            "get_auth_code_error": "获取短信验证码异常，请稍后重试。",
             "auth_code_error": "短信验证码错误，请重新输入。"
         }
     }
