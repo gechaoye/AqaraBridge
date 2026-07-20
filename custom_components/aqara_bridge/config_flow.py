@@ -1,3 +1,4 @@
+import datetime
 import logging
 import voluptuous as vol
 
@@ -9,13 +10,51 @@ from homeassistant.config_entries import (
     ConfigEntry,
 )
 from homeassistant.core import callback
+from homeassistant.util import dt as dt_util
 
-from . import init_hass_data, data_masking, gen_auth_entry
+from . import (
+    TOKEN_EXPIRY_UNKNOWN,
+    data_masking,
+    gen_auth_entry,
+    init_hass_data,
+    parse_token_expiry,
+    token_refresh_time,
+)
 from .core.const import *
 
 _LOGGER = logging.getLogger(__name__)
 
 DEVICE_GET_TOKEN_CONFIG = vol.Schema({vol.Required(CONF_FIELD_AUTH_CODE): str})
+
+
+def token_status_placeholders(data: dict) -> dict[str, str]:
+    """Return local token expiry and scheduled refresh details for the form."""
+    expires_at = parse_token_expiry(data.get(CONF_ENTRY_AUTH_EXPIRES_TIME))
+    if expires_at == TOKEN_EXPIRY_UNKNOWN:
+        return {
+            "token_expires_at": "—",
+            "token_refresh_at": "—",
+            "token_refresh_remaining": "—",
+        }
+
+    refresh_at = token_refresh_time(expires_at)
+    remaining_seconds = max(
+        0,
+        int((refresh_at - datetime.datetime.now(datetime.UTC)).total_seconds()),
+    )
+    days, remainder = divmod(remaining_seconds, 24 * 60 * 60)
+    hours, remainder = divmod(remainder, 60 * 60)
+    minutes = remainder // 60
+
+    return {
+        "token_expires_at": dt_util.as_local(expires_at).strftime(
+            "%Y-%m-%d %H:%M:%S %Z"
+        ),
+        "token_refresh_at": dt_util.as_local(refresh_at).strftime(
+            "%Y-%m-%d %H:%M:%S %Z"
+        ),
+        "token_refresh_remaining": f"{days}d {hours:02d}h {minutes:02d}m",
+    }
 
 
 class AqaraBridgeFlowHandler(ConfigFlow, domain=DOMAIN):
@@ -268,11 +307,17 @@ class OptionsFlowHandler(OptionsFlow):
                     CONF_FIELD_KEY_ID,
                     default=form_input.get(CONF_ENTRY_KEY_ID, vol.UNDEFINED),
                 ): str,
-                vol.Optional(CONF_FIELD_REFRESH_TOKEN): str,
+                vol.Optional(
+                    CONF_FIELD_REFRESH_TOKEN,
+                    default=form_input.get(CONF_ENTRY_AUTH_REFRESH_TOKEN, ""),
+                ): str,
             }
         )
         return self.async_show_form(
-            step_id="init", data_schema=config_scheme, errors=errors
+            step_id="init",
+            data_schema=config_scheme,
+            errors=errors,
+            description_placeholders=token_status_placeholders(form_input),
         )
 
     async def async_step_option_get_token(self, user_input=None):

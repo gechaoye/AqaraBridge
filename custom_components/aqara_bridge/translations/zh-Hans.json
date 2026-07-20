@@ -4,7 +4,8 @@
             "complete": "配置完成"
         },
         "error": {
-            "get_auth_code_error": "获取短信验证码异常，请稍后重试"
+            "get_auth_code_error": "获取短信验证码异常，请稍后重试",
+            "refresh_token_error": "刷新令牌错误，无法使用。"
         },
         "flow_title": "{name}",
         "step": {
@@ -41,9 +42,9 @@
                     "field_app_id": "开放平台app_id，需自行申请",
                     "field_app_key": "开放平台app_key，需自行申请",
                     "field_key_id": "开放平台key_id，需自行申请",
-                    "field_refresh_token": "刷新令牌（可选）"
+                    "field_refresh_token": "当前刷新令牌（清空后改用短信授权）"
                 },
-                "description": "刷新令牌留空时通过短信验证码重新授权；也可以手动填写有效的刷新令牌。",
+                "description": "当前刷新令牌已回填在表单中。访问令牌到期时间：{token_expires_at}；计划自动刷新时间：{token_refresh_at}；距离自动刷新：{token_refresh_remaining}。直接提交会立即刷新令牌；清空刷新令牌后提交，则通过短信验证码重新授权。",
                 "title": "选项"
             },
             "option_get_token": {

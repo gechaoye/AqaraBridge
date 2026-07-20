@@ -4,7 +4,8 @@
             "complete": "Config Finish."
         },
         "error": {
-            "get_auth_code_error": "Get SMS or Email Code Error."
+            "get_auth_code_error": "Get SMS or Email Code Error.",
+            "refresh_token_error": "Refresh Token invalid"
         },
         "flow_title": "{name}",
         "step": {
@@ -42,12 +43,12 @@
                 "data": {
                     "field_country_code": "Cloud Server Country/Region",
                     "field_account": "Aqara Home Account (Cellular Number/ Email)",
-                    "field_refresh_token": "Refresh Token (optional)",
+                    "field_refresh_token": "Current Refresh Token (clear for SMS reauthorization)",
                     "field_app_id": "Aqara Cloud Develop AppID",
                     "field_app_key": "Aqara Cloud Develop AppKey",
                     "field_key_id": "Aqara Cloud Develop KeyId"
                 },
-                "description": "Leave the refresh token blank to reauthorize with a verification code, or enter a valid refresh token manually.",
+                "description": "The current refresh token is prefilled below. Access token expires at {token_expires_at}; automatic refresh is scheduled for {token_refresh_at}; time until refresh: {token_refresh_remaining}. Submit it to refresh immediately, or clear it and submit to reauthorize with an SMS or email verification code.",
                 "title": "Login Aqara Cloud Server"
             },
             "option_get_token": {
