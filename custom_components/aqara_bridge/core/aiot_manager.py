@@ -29,7 +29,6 @@ RESOURCE_VALIDATED_MODELS = {
     "lumi.switch.acn034",
     "lumi.switch.acn066",
 }
-IDENTITY_ONLY_MODELS = {"lumi.switch.acn066"}
 
 
 def _resource_list(resources):
@@ -175,7 +174,8 @@ class AiotEntityBase(Entity):
             hw_version=device.heard_version,
             suggested_area=self._position_name,
         )
-        self._attr_supported_features = kwargs.get("supported_features")
+        if "supported_features" in kwargs:
+            self._attr_supported_features = kwargs["supported_features"]
         self._attr_unit_of_measurement = kwargs.get("unit_of_measurement")
         self._attr_device_class = kwargs.get("device_class")
 
@@ -581,6 +581,16 @@ class AiotManager:
         for device in self.all_devices:
             # 这里看情况检查did是否已经存在，理论上来说应该不会重复，现在代码未做重复判断
             if device.is_supported:
+                dr.async_get(self._hass).async_get_or_create(
+                    config_entry_id=config_entry.entry_id,
+                    identifiers={(DOMAIN, device.did)},
+                    manufacturer=device.manufacturer,
+                    name=device.device_name,
+                    model=device.model,
+                    sw_version=device.firmware_version,
+                    hw_version=device.heard_version,
+                    suggested_area=device.position_name,
+                )
                 if device.model in RESOURCE_VALIDATED_MODELS:
                     if device.model not in resource_info_by_model:
                         try:
@@ -604,40 +614,16 @@ class AiotManager:
                         device.resource_query_succeeded,
                         device.resource_info,
                     ) = resource_info_by_model[device.model]
-                if device.model in IDENTITY_ONLY_MODELS:
-                    dr.async_get(self._hass).async_get_or_create(
-                        config_entry_id=config_entry.entry_id,
-                        identifiers={(DOMAIN, device.did)},
-                        manufacturer=device.manufacturer,
-                        name=device.device_name,
-                        model=device.model,
-                        sw_version=device.firmware_version,
-                        hw_version=device.heard_version,
-                        suggested_area=device.position_name,
+                if (
+                    device.model in RESOURCE_VALIDATED_MODELS
+                    and device.resource_query_succeeded
+                    and not device.resource_info
+                ):
+                    _LOGGER.info(
+                        "Aqara model '%s' has no open resource metadata; "
+                        "attempting its known entity mappings",
+                        device.model,
                     )
-                    if not device.resource_query_succeeded:
-                        _LOGGER.warning(
-                            "Aqara model '%s' is registered without entities; "
-                            "the open resource query was unavailable",
-                            device.model,
-                        )
-                    elif device.resource_info:
-                        _LOGGER.warning(
-                            "Aqara model '%s' is recognized but does not yet have "
-                            "entity mappings; open resources: %s",
-                            device.model,
-                            [
-                                resource.get("resourceId")
-                                for resource in device.resource_info
-                                if isinstance(resource, dict)
-                            ],
-                        )
-                    else:
-                        _LOGGER.info(
-                            "Aqara model '%s' is registered without entities "
-                            "because this project exposes no resources",
-                            device.model,
-                        )
                 self._managed_devices[device.did] = device
                 self._entries_devices[config_entry.entry_id].append(device.did)
             else:
@@ -729,7 +715,7 @@ class AiotManager:
                 device.resource_names = []
             for j in range(len(params)):
                 open_resource_ids = None
-                if device.resource_query_succeeded:
+                if device.resource_query_succeeded and device.resource_info:
                     open_resource_ids = {
                         resource.get("resourceId")
                         for resource in device.resource_info

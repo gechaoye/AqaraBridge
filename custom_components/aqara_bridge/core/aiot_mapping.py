@@ -1045,9 +1045,17 @@ AIOT_DEVICE_MAPPING = [
         ],
     },
     {
-        # 妙控场景屏 S100。当前开放平台不提供 resourceId，先登记设备身份。
+        # 妙控场景屏 S100
         "lumi.switch.acn066": ["Aqara", "Panel Switch S100", ""],
-        "params": [],
+        "params": [
+            {
+                "switch": {
+                    MK_INIT_PARAMS: {MK_HASS_NAME: "wall_switch"},
+                    MK_RESOURCES: {"toggle": ("4.{}.85", "_attr_is_on")},
+                    MK_MAPPING_PARAMS: {"ch_count": 3},
+                }
+            }
+        ],
     },
     {
         # Aqara Home 创建的无状态红外遥控器和电视遥控器。
