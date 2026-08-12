@@ -202,36 +202,37 @@ async def async_setup_entry(hass, entry):
     entry.async_on_unload(cancel_token_refresh_timer)
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
-    if manager._msg_handler is not None:
-        # 如果重新配置，重新启动mq
-        manager._msg_handler.stop()
+    manager.stop_msg_handler()
+    await manager.async_add_all_devices(entry)
+    await manager.async_forward_entry_setup(entry)
     await manager.start_msg_hanlder(
         data[CONF_ENTRY_APP_ID], data[CONF_ENTRY_APP_KEY], data[CONF_ENTRY_KEY_ID]
     )
-    if len(manager.all_devices) == 0:
-        await manager.async_add_all_devices(entry)
-        await manager.async_forward_entry_setup(entry)
-    else:
-        await manager.async_add_all_devices(entry)
 
     return True
 
 
 async def async_unload_entry(hass, entry):
-    # if CONF_ENTRY_AUTH_ACCOUNT in entry.data:
-    #     hass.data[DOMAIN][HASS_DATA_AUTH_ENTRY_ID] = None
-    # else:
-    #     manager: AiotManager = hass.data[DOMAIN][HASS_DATA_AIOT_MANAGER]
-    #     await manager.async_unload_entry(entry)
+    """Unload platforms and clear runtime objects for a config entry."""
+    manager: AiotManager = hass.data[DOMAIN][HASS_DATA_AIOT_MANAGER]
+    platforms = manager.platforms_for_entry(entry)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
+    if not unload_ok:
+        return False
+
+    manager.stop_msg_handler()
+    await manager.async_remove_entry(entry)
+    if hass.data[DOMAIN].get(HASS_DATA_AUTH_ENTRY_ID) is entry:
+        hass.data[DOMAIN][HASS_DATA_AUTH_ENTRY_ID] = None
     return True
 
 
 async def async_remove_entry(hass, entry):
-    if CONF_ENTRY_AUTH_ACCOUNT in entry.data:
+    manager: AiotManager = hass.data[DOMAIN][HASS_DATA_AIOT_MANAGER]
+    manager.stop_msg_handler()
+    await manager.async_remove_entry(entry)
+    if hass.data[DOMAIN].get(HASS_DATA_AUTH_ENTRY_ID) is entry:
         hass.data[DOMAIN][HASS_DATA_AUTH_ENTRY_ID] = None
-    else:
-        manager: AiotManager = hass.data[DOMAIN][HASS_DATA_AIOT_MANAGER]
-        await manager.async_remove_entry(entry)
     return True
 
 

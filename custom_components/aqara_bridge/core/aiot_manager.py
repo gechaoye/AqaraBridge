@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .aiot_cloud import AiotCloud
 
@@ -28,6 +29,20 @@ RESOURCE_VALIDATED_MODELS = {
     "aqara.lock.dacn03",
     "lumi.switch.acn034",
     "lumi.switch.acn066",
+}
+
+# Objects returned by query.device.info that are not independently controllable
+# through Aqara's legacy resource API.
+NON_ENTITY_MODELS = {
+    "app.group.temperature": (
+        "Aqara Home temperature-control group; its member devices provide the "
+        "controllable entities"
+    ),
+    "aqara.swe_rob.stcn01": (
+        "externally authorized Roborock vacuum proxy; Aqara does not expose "
+        "controllable resources to this project, use Home Assistant's Roborock "
+        "integration"
+    ),
 }
 
 
@@ -92,6 +107,8 @@ class AiotDevice:
         self.manufacturer = None
         self.heard_version = None
         self.resource_names = []
+        self.resource_names_queried = False
+        self.resource_names_logged = False
         self.resource_info = None
         self.resource_query_succeeded = False
         for device in AIOT_DEVICE_MAPPING:
@@ -218,6 +235,16 @@ class AiotEntityBase(Entity):
     def position_name(self):
         return self._position_name
 
+    async def async_added_to_hass(self):
+        """Register only entities that Home Assistant actually enabled."""
+        await super().async_added_to_hass()
+        self._aiot_manager.register_entity(self)
+
+    async def async_will_remove_from_hass(self):
+        """Stop routing messages when the entity leaves its platform."""
+        self._aiot_manager.unregister_entity(self)
+        await super().async_will_remove_from_hass()
+
     @property
     def trigger_dt(self):
         if self.trigger_time is not None:
@@ -286,12 +313,24 @@ class AiotEntityBase(Entity):
         return await self._aiot_manager.session.async_query_resource_name(subjectIds)
 
     async def async_update(self):
-        resp = await self.async_fetch_res_values()
-        if resp:
-            for x in resp:
-                await self.async_set_attr(
-                    x["resourceId"], x["value"], x["timeStamp"], write_ha_state=False
-                )
+        try:
+            resp = await self.async_fetch_res_values()
+        except Exception:
+            self._attr_available = False
+            _LOGGER.warning(
+                "Unable to fetch initial state for Aqara entity %s",
+                self.unique_id,
+                exc_info=True,
+            )
+            return
+        if not resp:
+            self._attr_available = False
+            return
+        self._attr_available = True
+        for x in resp:
+            await self.async_set_attr(
+                x["resourceId"], x["value"], x["timeStamp"], write_ha_state=False
+            )
 
     async def async_set_resource(self, res_name, attr_value):
         """设置aiot resource的值"""
@@ -316,6 +355,7 @@ class AiotEntityBase(Entity):
 
     async def async_set_attr(self, res_id, res_value, timestamp, write_ha_state=True):
         """设置ha attr的值"""
+        self._attr_available = True
         res_name = next(
             k
             for k, v in self._res_params.items()
@@ -456,6 +496,24 @@ class AiotManager:
         self._session = session
         self._msg_handler = None
         self._options = None
+        self._all_devices = {}
+        self._managed_devices = {}
+        self._entries_devices = {}
+        self._config_entries = {}
+        self._devices_entities = {}
+        self._unsupported_devices = []
+
+    def register_entity(self, entity: AiotEntityBase):
+        """Route cloud messages to an entity present in Home Assistant."""
+        entities = self._devices_entities.setdefault(entity.device.did, [])
+        if entity not in entities:
+            entities.append(entity)
+
+    def unregister_entity(self, entity: AiotEntityBase):
+        """Remove an entity from cloud message routing."""
+        entities = self._devices_entities.get(entity.device.did)
+        if entities and entity in entities:
+            entities.remove(entity)
 
     @property
     def session(self) -> AiotCloud:
@@ -512,13 +570,20 @@ class AiotManager:
                                     x["resourceId"], x["value"], x["time"]
                                 )
                         if not is_support:
-                            _LOGGER.info(
-                                "[msg_callback, unsupport_resources]{}, {}, {}:{}".format(
-                                    ts_format_str_ms(x["time"], self._hass),
-                                    x["subjectId"],
-                                    x["resourceId"],
-                                    x["value"],
-                                )
+                            device = self._managed_devices.get(x["subjectId"])
+                            log = (
+                                _LOGGER.warning
+                                if device and device.model == "lumi.switch.acn034"
+                                else _LOGGER.info
+                            )
+                            log(
+                                "[msg_callback, unsupported_resource] %s, model=%s, "
+                                "subject=%s, resource=%s, value=%s",
+                                ts_format_str_ms(x["time"], self._hass),
+                                device.model if device else None,
+                                x["subjectId"],
+                                x["resourceId"],
+                                x["value"],
                             )
                     else:
                         _LOGGER.info(
@@ -574,7 +639,11 @@ class AiotManager:
 
     async def async_add_all_devices(self, config_entry: ConfigEntry):
         await self.async_refresh_all_devices()  # 刷新一次所有设备列表
-        self._entries_devices.setdefault(config_entry.entry_id, [])
+        old_device_ids = self._entries_devices.get(config_entry.entry_id, [])
+        for device_id in old_device_ids:
+            self._managed_devices.pop(device_id, None)
+            self._devices_entities.pop(device_id, None)
+        self._entries_devices[config_entry.entry_id] = []
         self._config_entries[config_entry.entry_id] = config_entry
         unsupported_models = set()
         resource_info_by_model = {}
@@ -614,6 +683,25 @@ class AiotManager:
                         device.resource_query_succeeded,
                         device.resource_info,
                     ) = resource_info_by_model[device.model]
+                if device.model == "lumi.switch.acn034":
+                    _LOGGER.warning(
+                        "S1 Plus open resource metadata: %s",
+                        [
+                            {
+                                key: resource.get(key)
+                                for key in (
+                                    "resourceId",
+                                    "name",
+                                    "access",
+                                    "valueType",
+                                    "enums",
+                                )
+                                if resource.get(key) is not None
+                            }
+                            for resource in (device.resource_info or [])
+                            if isinstance(resource, dict)
+                        ],
+                    )
                 if (
                     device.model in RESOURCE_VALIDATED_MODELS
                     and device.resource_query_succeeded
@@ -630,6 +718,13 @@ class AiotManager:
                 unsupported_models.add(device.model)
 
         for model in sorted(unsupported_models):
+            if reason := NON_ENTITY_MODELS.get(model):
+                _LOGGER.info(
+                    "Skipping recognized Aqara non-entity model '%s': %s",
+                    model,
+                    reason,
+                )
+                continue
             try:
                 resource_response = await self._session.async_query_resource_info(model)
             except Exception:
@@ -679,11 +774,20 @@ class AiotManager:
                 for i in range(len(self._managed_devices[x].platforms)):
                     platforms.extend(self._managed_devices[x].platforms[i].keys())
 
-        self._hass.async_create_task(
-            self._hass.config_entries.async_forward_entry_setups(
-                config_entry, set(platforms)
-            )
+        await self._hass.config_entries.async_forward_entry_setups(
+            config_entry, set(platforms)
         )
+
+    def platforms_for_entry(self, config_entry: ConfigEntry) -> set[str]:
+        """Return platforms forwarded for a config entry."""
+        platforms = set()
+        for device_id in self._entries_devices.get(config_entry.entry_id, []):
+            device = self._managed_devices.get(device_id)
+            if not device or not device.is_supported:
+                continue
+            for mapping in device.platforms:
+                platforms.update(mapping.keys())
+        return platforms
 
     async def async_add_entities(
         self, config_entry: ConfigEntry, entity_type: str, cls_list, async_add_entities
@@ -698,6 +802,34 @@ class AiotManager:
                     break
 
         entities = []
+        entity_registry = er.async_get(self._hass)
+
+        def create_entity(device, params, channel=None):
+            attr = params[MK_INIT_PARAMS][MK_HASS_NAME]
+            entity_class = cls_list.get(attr, cls_list["default"])
+            if channel is None:
+                return entity_class(
+                    self._hass,
+                    device,
+                    params[MK_RESOURCES],
+                    **params[MK_INIT_PARAMS],
+                )
+            return entity_class(
+                self._hass,
+                device,
+                params[MK_RESOURCES],
+                channel,
+                **params[MK_INIT_PARAMS],
+            )
+
+        def is_registered(entity):
+            return (
+                entity_registry.async_get_entity_id(
+                    entity_type, DOMAIN, entity.unique_id
+                )
+                is not None
+            )
+
         for device in devices:
             params = []
             self._devices_entities.setdefault(device.did, [])
@@ -707,13 +839,41 @@ class AiotManager:
                         if entity_type in p:
                             params.append(p[entity_type])
                     break
-            if any(param[MK_RESOURCES] for param in params):
-                device.resource_names = (
-                    await self._session.async_query_resource_name([device.did]) or []
-                )
-            else:
-                device.resource_names = []
+            if (
+                any(param[MK_RESOURCES] for param in params)
+                and not device.resource_names_queried
+            ):
+                try:
+                    device.resource_names = (
+                        await self._session.async_query_resource_name([device.did]) or []
+                    )
+                except Exception:
+                    device.resource_names = []
+                    _LOGGER.warning(
+                        "Unable to query resource names for Aqara model '%s'; "
+                        "entities will use their default names",
+                        device.model,
+                    )
+                device.resource_names_queried = True
+                if (
+                    device.model == "lumi.switch.acn034"
+                    and not device.resource_names_logged
+                ):
+                    _LOGGER.warning(
+                        "S1 Plus resource names: %s",
+                        [
+                            {
+                                key: resource.get(key)
+                                for key in ("resourceId", "name")
+                                if resource.get(key) is not None
+                            }
+                            for resource in device.resource_names
+                            if isinstance(resource, dict)
+                        ],
+                    )
+                    device.resource_names_logged = True
             for j in range(len(params)):
+                instance = None
                 open_resource_ids = None
                 if device.resource_query_succeeded and device.resource_info:
                     open_resource_ids = {
@@ -728,13 +888,20 @@ class AiotManager:
                     }
                     missing_resource_ids = mapped_resource_ids - open_resource_ids
                     if missing_resource_ids:
-                        _LOGGER.warning(
-                            "Skipping entity for Aqara model '%s'; resources are "
-                            "not open to this project: %s",
-                            device.model,
-                            sorted(missing_resource_ids),
+                        instance = create_entity(device, params[j])
+                        if not is_registered(instance):
+                            _LOGGER.warning(
+                                "Skipping new entity for Aqara model '%s'; "
+                                "resources are not open to this project: %s",
+                                device.model,
+                                sorted(missing_resource_ids),
+                            )
+                            continue
+                        _LOGGER.info(
+                            "Keeping registered Aqara entity '%s' despite missing "
+                            "open resource metadata",
+                            instance.unique_id,
                         )
-                        continue
                 ch_count = None
                 ch_start = None
                 if j == 0:
@@ -770,52 +937,38 @@ class AiotManager:
                             resource_id.format(channel)
                             for resource_id, _ in params[j][MK_RESOURCES].values()
                         }
+                        instance = create_entity(device, params[j], channel)
                         if open_resource_ids is not None:
                             missing_resource_ids = (
                                 channel_resource_ids - open_resource_ids
                             )
-                            if missing_resource_ids:
+                            if missing_resource_ids and not is_registered(instance):
                                 _LOGGER.warning(
-                                    "Skipping channel %s for Aqara model '%s'; "
+                                    "Skipping new channel %s for Aqara model '%s'; "
                                     "resources are not open to this project: %s",
                                     channel,
                                     device.model,
                                     sorted(missing_resource_ids),
                                 )
                                 continue
-                        attr = params[j].get(MK_INIT_PARAMS)[MK_HASS_NAME]
-                        t = cls_list.get(attr, None)
-                        if t is None:
-                            t = cls_list["default"]
-                        instance = t(
-                            self._hass,
-                            device,
-                            params[j][MK_RESOURCES],
-                            channel,
-                            **params[j].get(MK_INIT_PARAMS) or {},
-                        )
-                        self._devices_entities[device.did].append(instance)
                         entities.append(instance)
                 else:
-                    attr = params[j].get(MK_INIT_PARAMS)[MK_HASS_NAME]
-                    t = cls_list.get(attr, None)
-                    if t is None:
-                        t = cls_list["default"]
-                    instance = t(
-                        self._hass,
-                        device,
-                        params[j][MK_RESOURCES],
-                        **params[j].get(MK_INIT_PARAMS) or {},
-                    )
-                    self._devices_entities[device.did].append(instance)
+                    if instance is None:
+                        instance = create_entity(device, params[j])
                     entities.append(instance)
 
-        async_add_entities(entities, update_before_add=True)
+        async_add_entities(entities, update_before_add=entity_type != "event")
 
     async def async_remove_entry(self, config_entry):
-        """ConfigEntry remove."""
-        self._config_entries.pop(config_entry.entry_id)
-        device_ids = self._entries_devices[config_entry.entry_id]
+        """Forget runtime objects associated with a config entry."""
+        self._config_entries.pop(config_entry.entry_id, None)
+        device_ids = self._entries_devices.pop(config_entry.entry_id, [])
         for device_id in device_ids:
-            self._managed_devices.pop(device_id)
-            self._devices_entities.pop(device_id)
+            self._managed_devices.pop(device_id, None)
+            self._devices_entities.pop(device_id, None)
+
+    def stop_msg_handler(self):
+        """Stop and discard the current message consumer."""
+        if self._msg_handler is not None:
+            self._msg_handler.stop()
+            self._msg_handler = None

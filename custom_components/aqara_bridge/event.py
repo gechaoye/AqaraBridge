@@ -46,7 +46,7 @@ class AiotEventEntity(AiotEntityBase, EventEntity):
     def __init__(self, hass, device, res_params, channel=None, **kwargs):
         AiotEntityBase.__init__(self, hass, device, res_params, TYPE, channel, **kwargs)
         mapping = kwargs.get("event_mapping")
-        self._attr_event_types = list(mapping.values())
+        self._attr_event_types = list(dict.fromkeys(mapping.values()))
         self.event_mapping = mapping
         icon = kwargs.get("icon")
         if icon:
@@ -56,6 +56,9 @@ class AiotEventEntity(AiotEntityBase, EventEntity):
     @property
     def icon(self):
         return "mdi:button-pointer"
+
+    async def async_update(self):
+        """Wait for real-time events instead of querying a pulse resource."""
 
     def convert_res_to_attr(self, res_name, res_value):
         if res_name == "event":
@@ -75,6 +78,9 @@ class AiotButtonEntity(AiotEntityBase, EventEntity):
     def icon(self):
         """return icon."""
         return "mdi:button-pointer"
+
+    async def async_update(self):
+        """Wait for real-time events instead of querying a pulse resource."""
 
     def convert_res_to_attr(self, res_name, res_value):
         if res_name == "firmware_version":
@@ -120,6 +126,9 @@ class AiotCameraEntity(AiotEntityBase, EventEntity):
     def icon(self):
         """return icon."""
         return "mdi:alarm-light-outline"
+
+    async def async_update(self):
+        """Wait for real-time events instead of replaying the latest value."""
 
     def convert_res_to_attr(self, res_name, res_value):
         if res_name == "detect_face_event" and res_value not in (0, ""):

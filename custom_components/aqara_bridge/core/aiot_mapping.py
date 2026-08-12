@@ -1021,6 +1021,19 @@ AIOT_DEVICE_MAPPING = [
                 }
             },
             {
+                "event": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "default",
+                        "event_mapping": {"0": "single", **KN_BUTTON_3_MAPPING},
+                        "entity_name": "无线开关",
+                    },
+                    MK_RESOURCES: {"event": ("13.{}.85", "_attr_trigger")},
+                    # S1 Plus exposes three physical and six configurable
+                    # on-screen ButtonEvent endpoints.
+                    MK_MAPPING_PARAMS: {"ch_count": 9, "ch_start": 21},
+                }
+            },
+            {
                 "sensor": {
                     MK_INIT_PARAMS: {
                         MK_HASS_NAME: "power",
