@@ -629,13 +629,27 @@ class AiotManager:
         """获取Aiot所有设备"""
         self._all_devices = {}
         results = await self._session.async_query_all_devices_info()
-        for x in results:
-            device = AiotDevice(**x)
-            postions = await self._session.async_query_position_detail(
-                [device.position_id]
+        devices = [AiotDevice(**data) for data in results]
+        position_ids = list(
+            dict.fromkeys(
+                device.position_id for device in devices if device.position_id
             )
-            device.position_name = postions[0]["positionName"]
-            self._all_devices.setdefault(x["did"], device)
+        )
+        positions = {}
+        for offset in range(0, len(position_ids), 50):
+            details = await self._session.async_query_position_detail(
+                position_ids[offset : offset + 50]
+            )
+            positions.update(
+                {
+                    detail["positionId"]: detail.get("positionName")
+                    for detail in (details or [])
+                    if isinstance(detail, dict) and detail.get("positionId")
+                }
+            )
+        for device in devices:
+            device.position_name = positions.get(device.position_id)
+            self._all_devices.setdefault(device.did, device)
 
     async def async_add_all_devices(self, config_entry: ConfigEntry):
         await self.async_refresh_all_devices()  # 刷新一次所有设备列表

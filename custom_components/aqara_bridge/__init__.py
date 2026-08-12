@@ -7,12 +7,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.event import async_track_point_in_time
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .core.aiot_manager import (
     AiotManager,
     AiotDevice,
 )
 from .core.aiot_cloud import AiotCloud
+from .core.aiot_cloud import AqaraCloudAPIError
 from .core.const import *
 
 
@@ -203,8 +205,16 @@ async def async_setup_entry(hass, entry):
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     manager.stop_msg_handler()
-    await manager.async_add_all_devices(entry)
-    await manager.async_forward_entry_setup(entry)
+    try:
+        await manager.async_add_all_devices(entry)
+        await manager.async_forward_entry_setup(entry)
+    except AqaraCloudAPIError as err:
+        await manager.async_remove_entry(entry)
+        if err.code == 429:
+            raise ConfigEntryNotReady(
+                "Aqara cloud API rate limit reached; Home Assistant will retry"
+            ) from err
+        raise
     await manager.start_msg_hanlder(
         data[CONF_ENTRY_APP_ID], data[CONF_ENTRY_APP_KEY], data[CONF_ENTRY_KEY_ID]
     )

@@ -14,6 +14,19 @@ _LOGGER = logging.getLogger(__name__)
 class AqaraCloudAPIError(RuntimeError):
     """Raised when Aqara Cloud rejects a request after token refresh retry."""
 
+    def __init__(self, intent: str, code=None, message=None):
+        self.intent = intent
+        self.code = code
+        self.api_message = message
+        super().__init__(
+            "Aqara cloud API request failed: "
+            f"intent={intent}, code={code}, message={message}"
+        )
+
+
+RATE_LIMIT_RETRY_DELAYS = (2, 5, 10)
+MIN_REQUEST_INTERVAL = 0.2
+
 API_DOMAIN = {
     "CN": "open-cn.aqara.com",
     "USA": "open-usa.aqara.com",
@@ -58,7 +71,32 @@ class AiotCloud:
         self.session = session
         self.options = None
         self._refresh_lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
+        self._last_request_time = 0.0
+        self._rate_limit_until = 0.0
         self.set_country("CN")
+
+    async def _async_request(self, payload):
+        """Space API requests so entity setup does not burst the Aqara API."""
+        async with self._request_lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            wait_time = max(
+                self._rate_limit_until - now,
+                MIN_REQUEST_INTERVAL - (now - self._last_request_time),
+                0,
+            )
+            if wait_time:
+                await asyncio.sleep(wait_time)
+            self._last_request_time = loop.time()
+
+        response = await self.session.post(
+            url=self.api_url,
+            data=json.dumps(payload),
+            headers=self._get_request_headers(),
+        )
+        raw = await response.read()
+        return response, json.loads(raw)
 
     def set_options(self, options):
         """set hass options"""
@@ -112,7 +150,12 @@ class AiotCloud:
         return headers
 
     async def _async_invoke_aqara_cloud_api(
-        self, intent: str, only_result: bool = True, list_data: bool = False, **kwargs
+        self,
+        intent: str,
+        only_result: bool = True,
+        list_data: bool = False,
+        _rate_limit_attempt: int = 0,
+        **kwargs,
     ):
         """调用Aqara Api"""
         try:
@@ -127,13 +170,39 @@ class AiotCloud:
                 else {"intent": intent, "data": kwargs}
             )
             request_access_token = self.access_token
-            r = await self.session.post(
-                url=self.api_url,
-                data=json.dumps(payload),
-                headers=self._get_request_headers(),
-            )
-            raw = await r.read()
-            jo = json.loads(raw)
+            response, jo = await self._async_request(payload)
+
+            if jo.get("code") == 429:
+                if _rate_limit_attempt < len(RATE_LIMIT_RETRY_DELAYS):
+                    delay = RATE_LIMIT_RETRY_DELAYS[_rate_limit_attempt]
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = max(delay, min(float(retry_after), 60))
+                        except ValueError:
+                            pass
+                    self._rate_limit_until = max(
+                        self._rate_limit_until,
+                        asyncio.get_running_loop().time() + delay,
+                    )
+                    _LOGGER.warning(
+                        "Aqara API rate limited intent %s; retrying in %.1f seconds "
+                        "(%s/%s)",
+                        intent,
+                        delay,
+                        _rate_limit_attempt + 1,
+                        len(RATE_LIMIT_RETRY_DELAYS),
+                    )
+                    return await self._async_invoke_aqara_cloud_api(
+                        intent,
+                        only_result,
+                        list_data,
+                        _rate_limit_attempt=_rate_limit_attempt + 1,
+                        **kwargs,
+                    )
+                raise AqaraCloudAPIError(
+                    intent, jo.get("code"), jo.get("message")
+                )
 
             if only_result:
                 # 这里的异常处理需要优化
@@ -164,16 +233,17 @@ class AiotCloud:
                                 "Aiot token refresh failed, please do authorization again！"
                             )
                     raise AqaraCloudAPIError(
-                        "Aqara cloud API failed after refresh retry: "
-                        f"intent={intent}, code={jo.get('code')}, "
-                        f"message={jo.get('message')}"
+                        intent, jo.get("code"), jo.get("message")
                     )
                 return jo.get("result")
 
             return jo
 
         except AqaraCloudAPIError as ex:
-            _LOGGER.error(ex)
+            if ex.code == 429:
+                _LOGGER.warning(ex)
+            else:
+                _LOGGER.error(ex)
             raise
         except Exception as ex:
             _LOGGER.error(ex)
