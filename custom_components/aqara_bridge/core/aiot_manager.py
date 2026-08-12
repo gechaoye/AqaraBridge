@@ -31,6 +31,10 @@ RESOURCE_VALIDATED_MODELS = {
     "lumi.switch.acn066",
 }
 
+STRICT_RESOURCE_MODELS = {"aqara.lock.dacn03"}
+
+VIRTUAL_IR_MODELS = {"virtual.ir.default", "virtual.ir.tv"}
+
 # Objects returned by query.device.info that are not independently controllable
 # through Aqara's legacy resource API.
 NON_ENTITY_MODELS = {
@@ -56,6 +60,35 @@ def _resource_list(resources):
             data = data.get("data", [])
         return data if isinstance(data, list) else []
     return []
+
+
+def _ir_command_map(response):
+    """Normalize infrared key records returned by Aqara Cloud."""
+    if isinstance(response, list):
+        keys = response
+    elif isinstance(response, dict):
+        keys = response.get("keys")
+        if not isinstance(keys, list):
+            for container_name in ("result", "data"):
+                nested = response.get(container_name)
+                commands = _ir_command_map(nested)
+                if commands:
+                    return commands
+            return {}
+    else:
+        return {}
+
+    commands = {}
+    for key in keys:
+        if not isinstance(key, dict):
+            continue
+        key_name = key.get("keyName") or key.get("name")
+        key_id = key.get("keyId")
+        if key_id is None:
+            key_id = key.get("id")
+        if key_name and key_id is not None:
+            commands[str(key_name)] = str(key_id)
+    return commands
 
 
 def __init_rocketmq():
@@ -506,6 +539,8 @@ class AiotManager:
         self._config_entries = {}
         self._devices_entities = {}
         self._unsupported_devices = []
+        self._ir_commands = {}
+        self._ir_command_tasks = {}
 
     def register_entity(self, entity: AiotEntityBase):
         """Route cloud messages to an entity present in Home Assistant."""
@@ -546,6 +581,54 @@ class AiotManager:
         devices = []
         [devices.append(x) for x in self._all_devices.values() if not x.is_supported]
         return devices
+
+    def devices_for_entry(self, config_entry: ConfigEntry) -> list[AiotDevice]:
+        """Return managed devices belonging to a config entry."""
+        return [
+            self._managed_devices[device_id]
+            for device_id in self._entries_devices.get(config_entry.entry_id, [])
+            if device_id in self._managed_devices
+        ]
+
+    async def async_get_ir_commands(self, device: AiotDevice) -> dict[str, str]:
+        """Return and cache the command map for a virtual infrared remote."""
+        if device.did in self._ir_commands:
+            return self._ir_commands[device.did]
+
+        task = self._ir_command_tasks.get(device.did)
+        if task is None:
+            task = asyncio.create_task(self._session.async_query_ir_keys(device.did))
+            self._ir_command_tasks[device.did] = task
+        try:
+            response = await task
+        except Exception:
+            _LOGGER.warning(
+                "Unable to query infrared commands for Aqara remote '%s'",
+                device.device_name,
+                exc_info=True,
+            )
+            raise
+        finally:
+            if self._ir_command_tasks.get(device.did) is task:
+                self._ir_command_tasks.pop(device.did, None)
+
+        commands = _ir_command_map(response)
+        self._ir_commands[device.did] = commands
+        if commands:
+            _LOGGER.info(
+                "Loaded %s infrared commands for Aqara remote '%s': %s",
+                len(commands),
+                device.device_name,
+                sorted(commands),
+            )
+        else:
+            _LOGGER.warning(
+                "Aqara Cloud returned no infrared commands for remote '%s'; "
+                "response type: %s",
+                device.device_name,
+                type(response).__name__,
+            )
+        return commands
 
     async def start_msg_hanlder(self, app_id, app_key, key_id):
         self._msg_handler = AiotMessageHandler(
@@ -792,6 +875,12 @@ class AiotManager:
                 for i in range(len(self._managed_devices[x].platforms)):
                     platforms.extend(self._managed_devices[x].platforms[i].keys())
 
+        if any(
+            self._managed_devices[x].model in VIRTUAL_IR_MODELS
+            for x in devices_in_entry
+        ):
+            platforms.append("button")
+
         await self._hass.config_entries.async_forward_entry_setups(
             config_entry, set(platforms)
         )
@@ -805,6 +894,8 @@ class AiotManager:
                 continue
             for mapping in device.platforms:
                 platforms.update(mapping.keys())
+            if device.model in VIRTUAL_IR_MODELS:
+                platforms.add("button")
         return platforms
 
     async def async_add_entities(
@@ -893,7 +984,9 @@ class AiotManager:
             for j in range(len(params)):
                 instance = None
                 open_resource_ids = None
-                if device.resource_query_succeeded and device.resource_info:
+                if device.resource_query_succeeded and (
+                    device.resource_info or device.model in STRICT_RESOURCE_MODELS
+                ):
                     open_resource_ids = {
                         resource.get("resourceId")
                         for resource in device.resource_info
@@ -989,6 +1082,10 @@ class AiotManager:
         for device_id in device_ids:
             self._managed_devices.pop(device_id, None)
             self._devices_entities.pop(device_id, None)
+            self._ir_commands.pop(device_id, None)
+            task = self._ir_command_tasks.pop(device_id, None)
+            if task and not task.done():
+                task.cancel()
 
     def stop_msg_handler(self):
         """Stop and discard the current message consumer."""

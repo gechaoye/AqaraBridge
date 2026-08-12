@@ -21,25 +21,6 @@ DATA_KEY = f"{TYPE}.{DOMAIN}"
 _LOGGER = logging.getLogger(__name__)
 
 
-def _extract_ir_keys(response):
-    """Return infrared key records from known Aqara response envelopes."""
-    if isinstance(response, list):
-        return response
-    if not isinstance(response, dict):
-        return []
-
-    keys = response.get("keys")
-    if isinstance(keys, list):
-        return keys
-    for container_name in ("result", "data"):
-        nested = response.get(container_name)
-        if nested is not response:
-            keys = _extract_ir_keys(nested)
-            if keys:
-                return keys
-    return []
-
-
 async def async_setup_entry(hass, config_entry, async_add_entities):
     manager: AiotManager = hass.data[DOMAIN][HASS_DATA_AIOT_MANAGER]
     cls_entities = {
@@ -172,40 +153,11 @@ class AiotCloudIrRemote(AiotEntityBase, RemoteEntity):
 
     async def _async_refresh_commands(self):
         try:
-            response = await self._aiot_manager.session.async_query_ir_keys(
-                self.device.did
+            self._commands = await self._aiot_manager.async_get_ir_commands(
+                self.device
             )
         except Exception:
-            _LOGGER.warning(
-                "Unable to query infrared commands for Aqara device '%s'",
-                self.device.did,
-            )
             return
-        commands = {}
-        for key in _extract_ir_keys(response):
-            if not isinstance(key, dict):
-                continue
-            key_name = key.get("keyName") or key.get("name")
-            key_id = key.get("keyId")
-            if key_id is None:
-                key_id = key.get("id")
-            if key_name and key_id is not None:
-                commands[str(key_name)] = str(key_id)
-        self._commands = commands
-        if not commands:
-            _LOGGER.warning(
-                "Aqara Cloud returned no infrared commands for remote '%s'; "
-                "response type: %s",
-                self.device.device_name,
-                type(response).__name__,
-            )
-        else:
-            _LOGGER.info(
-                "Loaded %s infrared commands for Aqara remote '%s': %s",
-                len(commands),
-                self.device.device_name,
-                sorted(commands),
-            )
 
     async def async_send_command(self, command, **kwargs):
         """Send commands using their Aqara key name or raw key ID."""
