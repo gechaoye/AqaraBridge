@@ -391,6 +391,18 @@ class AiotCloud:
             resources=[{"subjectId": subject_id, "keyId": keyid}],
         )
 
+    async def async_query_ir_keys(self, subject_id: str):
+        """Query the keys exposed by a stateless infrared remote."""
+        return await self._async_invoke_aqara_cloud_api(
+            intent="query.ir.keys", did=subject_id
+        )
+
+    async def async_click_ir_key(self, subject_id: str, key_id: str):
+        """Send one key press to an infrared remote."""
+        return await self._async_invoke_aqara_cloud_api(
+            intent="write.ir.click", did=subject_id, keyId=str(key_id)
+        )
+
     async def async_query_position_detail(self, positionIds: list):
         """查询位置信息"""
         return await self._async_invoke_aqara_cloud_api(

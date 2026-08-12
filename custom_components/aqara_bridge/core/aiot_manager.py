@@ -8,6 +8,7 @@ from datetime import datetime
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity import DeviceInfo, Entity
+from homeassistant.helpers import device_registry as dr
 
 from .aiot_cloud import AiotCloud
 
@@ -22,6 +23,25 @@ from .const import DOMAIN, HASS_DATA_AIOT_MANAGER
 from .utils import *
 
 _LOGGER = logging.getLogger(__name__)
+
+RESOURCE_VALIDATED_MODELS = {
+    "aqara.lock.dacn03",
+    "lumi.switch.acn034",
+    "lumi.switch.acn066",
+}
+IDENTITY_ONLY_MODELS = {"lumi.switch.acn066"}
+
+
+def _resource_list(resources):
+    """Normalize query.resource.info responses from different API versions."""
+    if isinstance(resources, list):
+        return resources
+    if isinstance(resources, dict):
+        data = resources.get("data", [])
+        if isinstance(data, dict):
+            data = data.get("data", [])
+        return data if isinstance(data, list) else []
+    return []
 
 
 def __init_rocketmq():
@@ -73,6 +93,8 @@ class AiotDevice:
         self.manufacturer = None
         self.heard_version = None
         self.resource_names = []
+        self.resource_info = None
+        self.resource_query_succeeded = False
         for device in AIOT_DEVICE_MAPPING:
             if self.model in device:
                 self.platforms = device["params"]
@@ -136,10 +158,10 @@ class AiotEntityBase(Entity):
         )
 
         self._attr_unique_id = f"{DOMAIN}.{type_name}_{manufacturer.lower()}_{device.did.split('.', 1)[1][-6:]}_{kwargs.get('hass_attr_name')}"
-        self.entity_id = f"{DOMAIN}.{manufacturer.lower()}_{device.did.split('.', 1)[1][-6:]}_{kwargs.get('hass_attr_name')}"
+        self._suggested_object_id = f"{manufacturer.lower()}_{device.did.split('.', 1)[1][-6:]}_{kwargs.get('hass_attr_name')}"
         if channel:
             self._attr_unique_id = f"{self._attr_unique_id}_{channel}"
-            self.entity_id = f"{self.entity_id}_{channel}"
+            self._suggested_object_id = f"{self._suggested_object_id}_{channel}"
         if kwargs.get("unique_id_extra"):
             unique_id_extra = kwargs.get("unique_id_extra")
             self._attr_unique_id = f"{self._attr_unique_id}_{unique_id_extra}"
@@ -163,6 +185,11 @@ class AiotEntityBase(Entity):
     @property
     def channel(self) -> int:
         return self._channel
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Return the stable object ID while HA selects the platform domain."""
+        return self._suggested_object_id
 
     @property
     def supported_resources(self) -> list:
@@ -549,16 +576,114 @@ class AiotManager:
         await self.async_refresh_all_devices()  # 刷新一次所有设备列表
         self._entries_devices.setdefault(config_entry.entry_id, [])
         self._config_entries[config_entry.entry_id] = config_entry
+        unsupported_models = set()
+        resource_info_by_model = {}
         for device in self.all_devices:
             # 这里看情况检查did是否已经存在，理论上来说应该不会重复，现在代码未做重复判断
             if device.is_supported:
+                if device.model in RESOURCE_VALIDATED_MODELS:
+                    if device.model not in resource_info_by_model:
+                        try:
+                            resource_response = (
+                                await self._session.async_query_resource_info(
+                                    device.model
+                                )
+                            )
+                            resource_info_by_model[device.model] = (
+                                resource_response is not None,
+                                _resource_list(resource_response),
+                            )
+                        except Exception:
+                            resource_info_by_model[device.model] = (False, [])
+                            _LOGGER.warning(
+                                "Unable to query open resources for supported Aqara "
+                                "model '%s'; mapped entities will still be loaded",
+                                device.model,
+                            )
+                    (
+                        device.resource_query_succeeded,
+                        device.resource_info,
+                    ) = resource_info_by_model[device.model]
+                if device.model in IDENTITY_ONLY_MODELS:
+                    dr.async_get(self._hass).async_get_or_create(
+                        config_entry_id=config_entry.entry_id,
+                        identifiers={(DOMAIN, device.did)},
+                        manufacturer=device.manufacturer,
+                        name=device.device_name,
+                        model=device.model,
+                        sw_version=device.firmware_version,
+                        hw_version=device.heard_version,
+                        suggested_area=device.position_name,
+                    )
+                    if not device.resource_query_succeeded:
+                        _LOGGER.warning(
+                            "Aqara model '%s' is registered without entities; "
+                            "the open resource query was unavailable",
+                            device.model,
+                        )
+                    elif device.resource_info:
+                        _LOGGER.warning(
+                            "Aqara model '%s' is recognized but does not yet have "
+                            "entity mappings; open resources: %s",
+                            device.model,
+                            [
+                                resource.get("resourceId")
+                                for resource in device.resource_info
+                                if isinstance(resource, dict)
+                            ],
+                        )
+                    else:
+                        _LOGGER.info(
+                            "Aqara model '%s' is registered without entities "
+                            "because this project exposes no resources",
+                            device.model,
+                        )
                 self._managed_devices[device.did] = device
                 self._entries_devices[config_entry.entry_id].append(device.did)
             else:
+                unsupported_models.add(device.model)
+
+        for model in sorted(unsupported_models):
+            try:
+                resource_response = await self._session.async_query_resource_info(model)
+            except Exception:
                 _LOGGER.warning(
-                    f"Aqara device is not supported. Deivce model is '{device.model}'."
+                    "Aqara device is not supported. Device model is '%s'; "
+                    "open resource query failed",
+                    model,
                 )
                 continue
+            if resource_response is None:
+                _LOGGER.warning(
+                    "Aqara device is not supported. Device model is '%s'; "
+                    "open resource query was unavailable",
+                    model,
+                )
+                continue
+            resources = _resource_list(resource_response)
+            diagnostic = [
+                {
+                    key: resource.get(key)
+                    for key in (
+                        "resourceId",
+                        "name",
+                        "access",
+                        "valueType",
+                        "minValue",
+                        "maxValue",
+                        "enums",
+                    )
+                    if resource.get(key) is not None
+                }
+                for resource in (resources or [])
+                if isinstance(resource, dict)
+            ]
+            _LOGGER.warning(
+                "Aqara device is not supported. Device model is '%s'; "
+                "open resources: %s",
+                model,
+                diagnostic,
+            )
 
     async def async_forward_entry_setup(self, config_entry: ConfigEntry):
         devices_in_entry = self._entries_devices[config_entry.entry_id]
@@ -596,10 +721,34 @@ class AiotManager:
                         if entity_type in p:
                             params.append(p[entity_type])
                     break
-            device.resource_names = await self._session.async_query_resource_name(
-                [device.did]
-            )
+            if any(param[MK_RESOURCES] for param in params):
+                device.resource_names = (
+                    await self._session.async_query_resource_name([device.did]) or []
+                )
+            else:
+                device.resource_names = []
             for j in range(len(params)):
+                open_resource_ids = None
+                if device.resource_query_succeeded:
+                    open_resource_ids = {
+                        resource.get("resourceId")
+                        for resource in device.resource_info
+                        if isinstance(resource, dict)
+                    }
+                    mapped_resource_ids = {
+                        resource_id
+                        for resource_id, _ in params[j][MK_RESOURCES].values()
+                        if "{}" not in resource_id
+                    }
+                    missing_resource_ids = mapped_resource_ids - open_resource_ids
+                    if missing_resource_ids:
+                        _LOGGER.warning(
+                            "Skipping entity for Aqara model '%s'; resources are "
+                            "not open to this project: %s",
+                            device.model,
+                            sorted(missing_resource_ids),
+                        )
+                        continue
                 ch_count = None
                 ch_start = None
                 if j == 0:
@@ -630,26 +779,35 @@ class AiotManager:
 
                 if ch_count:
                     for i in range(ch_count):
+                        channel = i + ch_start if ch_start else i + 1
+                        channel_resource_ids = {
+                            resource_id.format(channel)
+                            for resource_id, _ in params[j][MK_RESOURCES].values()
+                        }
+                        if open_resource_ids is not None:
+                            missing_resource_ids = (
+                                channel_resource_ids - open_resource_ids
+                            )
+                            if missing_resource_ids:
+                                _LOGGER.warning(
+                                    "Skipping channel %s for Aqara model '%s'; "
+                                    "resources are not open to this project: %s",
+                                    channel,
+                                    device.model,
+                                    sorted(missing_resource_ids),
+                                )
+                                continue
                         attr = params[j].get(MK_INIT_PARAMS)[MK_HASS_NAME]
                         t = cls_list.get(attr, None)
                         if t is None:
                             t = cls_list["default"]
-                        if ch_start:
-                            instance = t(
-                                self._hass,
-                                device,
-                                params[j][MK_RESOURCES],
-                                i + ch_start,
-                                **params[j].get(MK_INIT_PARAMS) or {},
-                            )
-                        else:
-                            instance = t(
-                                self._hass,
-                                device,
-                                params[j][MK_RESOURCES],
-                                i + 1,
-                                **params[j].get(MK_INIT_PARAMS) or {},
-                            )
+                        instance = t(
+                            self._hass,
+                            device,
+                            params[j][MK_RESOURCES],
+                            channel,
+                            **params[j].get(MK_INIT_PARAMS) or {},
+                        )
                         self._devices_entities[device.did].append(instance)
                         entities.append(instance)
                 else:

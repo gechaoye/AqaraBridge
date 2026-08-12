@@ -45,6 +45,9 @@ class AiotBinarySensorEntity(AiotEntityBase, BinarySensorEntity):
             return int(res_value)
         if res_name in ["moisture", "smoke", "gas"]:
             return int(res_value) != 0
+        if res_name == "latch_state":
+            # HA's lock binary sensor is on when unlocked.
+            return int(res_value) == 0
         return super().convert_res_to_attr(res_name, res_value)
 
     @property

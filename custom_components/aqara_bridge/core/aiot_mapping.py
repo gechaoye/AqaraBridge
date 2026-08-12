@@ -20,11 +20,11 @@ from homeassistant.components.event import EventDeviceClass
 from homeassistant.components.light import ColorMode, LightEntityFeature
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import (
-    CONCENTRATION_PARTS_PER_BILLION,
     LIGHT_LUX,
     PERCENTAGE,
     UnitOfEnergy,
     UnitOfPower,
+    UnitOfRatio,
     UnitOfTemperature,
 )
 
@@ -983,6 +983,83 @@ AIOT_DEVICE_MAPPING = [
                     MK_RESOURCES: {"energy": ("0.13.85", "_attr_native_value")},
                 }
             },
+        ],
+    },
+    {
+        # 集悦妙控屏 S1 Plus
+        "lumi.switch.acn034": ["Aqara", "MagicPad S1 Plus", ""],
+        "params": [
+            {
+                "switch": {
+                    MK_INIT_PARAMS: {MK_HASS_NAME: "screen_saver"},
+                    MK_RESOURCES: {"toggle": ("4.46.85", "_attr_is_on")},
+                }
+            },
+            {
+                "switch": {
+                    MK_INIT_PARAMS: {MK_HASS_NAME: "do_not_disturb"},
+                    MK_RESOURCES: {"toggle": ("4.22.85", "_attr_is_on")},
+                }
+            },
+            {
+                "switch": {
+                    MK_INIT_PARAMS: {MK_HASS_NAME: "auto_brightness"},
+                    MK_RESOURCES: {"toggle": ("4.14.85", "_attr_is_on")},
+                }
+            },
+            {
+                "switch": {
+                    MK_INIT_PARAMS: {MK_HASS_NAME: "key_tone"},
+                    MK_RESOURCES: {"toggle": ("4.31.85", "_attr_is_on")},
+                }
+            },
+            {
+                "switch": {
+                    MK_INIT_PARAMS: {MK_HASS_NAME: "wall_switch"},
+                    MK_RESOURCES: {"toggle": ("4.{}.85", "_attr_is_on")},
+                    MK_MAPPING_PARAMS: {"ch_count": 3},
+                }
+            },
+            {
+                "sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "power",
+                        "device_class": SensorDeviceClass.POWER,
+                        "state_class": SensorStateClass.MEASUREMENT,
+                        "unit_of_measurement": UnitOfPower.WATT,
+                    },
+                    MK_RESOURCES: {"power": ("0.12.85", "_attr_native_value")},
+                }
+            },
+            {
+                "sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "energy",
+                        "device_class": SensorDeviceClass.ENERGY,
+                        "state_class": SensorStateClass.TOTAL_INCREASING,
+                        "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+                    },
+                    MK_RESOURCES: {"energy": ("0.13.85", "_attr_native_value")},
+                }
+            },
+        ],
+    },
+    {
+        # 妙控场景屏 S100。当前开放平台不提供 resourceId，先登记设备身份。
+        "lumi.switch.acn066": ["Aqara", "Panel Switch S100", ""],
+        "params": [],
+    },
+    {
+        # Aqara Home 创建的无状态红外遥控器和电视遥控器。
+        "virtual.ir.default": ["Aqara", "IR Remote", ""],
+        "virtual.ir.tv": ["Aqara", "TV IR Remote", ""],
+        "params": [
+            {
+                "remote": {
+                    MK_INIT_PARAMS: {MK_HASS_NAME: "cloud_ir"},
+                    MK_RESOURCES: {},
+                }
+            }
         ],
     },
     {
@@ -1985,7 +2062,7 @@ AIOT_DEVICE_MAPPING = [
                         MK_HASS_NAME: "TVOC",
                         "device_class": SensorDeviceClass.VOLATILE_ORGANIC_COMPOUNDS_PARTS,
                         "state_class": SensorStateClass.MEASUREMENT,
-                        "unit_of_measurement": CONCENTRATION_PARTS_PER_BILLION,
+                        "unit_of_measurement": UnitOfRatio.PARTS_PER_BILLION,
                     },
                     MK_RESOURCES: {
                         "TVOC": (
@@ -2282,6 +2359,94 @@ AIOT_DEVICE_MAPPING = [
         ],
     },
     ###############################门锁#############################################
+    {
+        # 全自动智能猫眼锁 H100
+        "aqara.lock.dacn03": ["Aqara", "Door Lock H100", "ZNMS21LM"],
+        "params": [
+            {
+                "binary_sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "latch",
+                        "device_class": BinarySensorDeviceClass.LOCK,
+                    },
+                    MK_RESOURCES: {
+                        "latch_state": ("4.20.85", "_attr_is_on"),
+                    },
+                }
+            },
+            {
+                "sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "lock_state",
+                    },
+                    MK_RESOURCES: {
+                        "lock_state": ("13.31.85", "_attr_native_value")
+                    },
+                }
+            },
+            {
+                "sensor": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "battery",
+                        "device_class": SensorDeviceClass.BATTERY,
+                        "state_class": SensorStateClass.MEASUREMENT,
+                        "unit_of_measurement": PERCENTAGE,
+                    },
+                    MK_RESOURCES: {"battery": ("13.56.85", "_attr_native_value")},
+                }
+            },
+            {
+                "event": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "inside_unlock",
+                        "entity_name": "室内解锁",
+                        "unique_id_extra": "inside_unlock",
+                    },
+                    MK_RESOURCES: {"event": ("13.51.85", "_attr_native_value")},
+                }
+            },
+            {
+                "event": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "fingerprint_unlock",
+                        "entity_name": "指纹解锁",
+                        "unique_id_extra": "fingerprint_unlock",
+                    },
+                    MK_RESOURCES: {"event": ("13.42.85", "_attr_native_value")},
+                }
+            },
+            {
+                "event": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "password_unlock",
+                        "entity_name": "密码解锁",
+                        "unique_id_extra": "password_unlock",
+                    },
+                    MK_RESOURCES: {"event": ("13.43.85", "_attr_native_value")},
+                }
+            },
+            {
+                "event": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "nfc_unlock",
+                        "entity_name": "NFC 解锁",
+                        "unique_id_extra": "nfc_unlock",
+                    },
+                    MK_RESOURCES: {"event": ("13.44.85", "_attr_native_value")},
+                }
+            },
+            {
+                "event": {
+                    MK_INIT_PARAMS: {
+                        MK_HASS_NAME: "temporary_password_unlock",
+                        "entity_name": "临时密码解锁",
+                        "unique_id_extra": "temporary_password_unlock",
+                    },
+                    MK_RESOURCES: {"event": ("13.46.85", "_attr_native_value")},
+                }
+            },
+        ],
+    },
     {
         # P100门锁
         "aqara.lock.wbzac1": ["Aqara", "DoorLock P100", ""],

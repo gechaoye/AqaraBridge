@@ -1,9 +1,7 @@
 """ Aqara Bridge remote """
 import asyncio
-import time
-import voluptuous as vol
-from datetime import datetime
-from homeassistant.helpers import config_validation as cv
+import logging
+from datetime import datetime, timedelta
 from homeassistant.components.remote import (
     ATTR_DELAY_SECS,
     ATTR_NUM_REPEATS,
@@ -19,12 +17,15 @@ TYPE = "remote"
 
 DATA_KEY = f"{TYPE}.{DOMAIN}"
 
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     manager: AiotManager = hass.data[DOMAIN][HASS_DATA_AIOT_MANAGER]
     cls_entities = {
         "pair": AiotRemotePair,
         "ir": AiotRemoteIrda,
+        "cloud_ir": AiotCloudIrRemote,
         "default": AiotRemoteEntity
     }
     await manager.async_add_entities(
@@ -86,7 +87,7 @@ class AiotRemoteIrda(AiotEntityBase, RemoteEntity):
 
         for _ in range(num_repeats):
             await self.async_set_resource("irda", command)
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
     async def async_learn_command(self, **kwargs):
         """Handle a learn command."""
@@ -97,9 +98,8 @@ class AiotRemoteIrda(AiotEntityBase, RemoteEntity):
             keyid = resp['keyId']
 
             start_time = datetime.utcnow()
-            while (datetime.utcnow() - start_time) < datetime.timedelta(seconds=timeout):
-                message = await self.hass.async_add_executor_job(
-                    self.async_received_learnresult, keyid)
+            while (datetime.utcnow() - start_time) < timedelta(seconds=timeout):
+                message = await self.async_received_learnresult(keyid)
                 # _LOGGER.info("Message received from device: '%s'", message)
 
                 if isinstance(message, dict):
@@ -113,3 +113,61 @@ class AiotRemoteIrda(AiotEntityBase, RemoteEntity):
                     await self.async_infrared_learn(False)
 
                 await asyncio.sleep(1)
+
+
+class AiotCloudIrRemote(AiotEntityBase, RemoteEntity):
+    """Aqara cloud infrared remote backed by the dedicated IR API."""
+
+    def __init__(self, hass, device, res_params, **kwargs):
+        AiotEntityBase.__init__(self, hass, device, res_params, TYPE, **kwargs)
+        self._attr_is_on = device.state == 1
+        self._commands = {}
+        self._extra_state_attributes.append("commands")
+
+    @property
+    def commands(self):
+        """Return the command names reported by Aqara Cloud."""
+        return sorted(self._commands)
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        await self._async_refresh_commands()
+
+    async def async_update(self):
+        """The dedicated infrared API has no resource values to poll."""
+
+    async def _async_refresh_commands(self):
+        try:
+            response = await self._aiot_manager.session.async_query_ir_keys(
+                self.device.did
+            )
+        except Exception:
+            _LOGGER.warning(
+                "Unable to query infrared commands for Aqara device '%s'",
+                self.device.did,
+            )
+            return
+        keys = response.get("keys", []) if isinstance(response, dict) else []
+        self._commands = {
+            str(key["keyName"]): str(key["keyId"])
+            for key in keys
+            if isinstance(key, dict) and key.get("keyName") and key.get("keyId")
+        }
+
+    async def async_send_command(self, command, **kwargs):
+        """Send commands using their Aqara key name or raw key ID."""
+        if not self._commands:
+            await self._async_refresh_commands()
+
+        commands = [command] if isinstance(command, str) else command
+        repeats = kwargs.get(ATTR_NUM_REPEATS, 1)
+        delay = kwargs.get(ATTR_DELAY_SECS, DEFAULT_DELAY_SECS)
+        normalized = {name.casefold(): key_id for name, key_id in self._commands.items()}
+
+        for _ in range(repeats):
+            for name in commands:
+                key_id = normalized.get(str(name).casefold(), str(name))
+                await self._aiot_manager.session.async_click_ir_key(
+                    self.device.did, key_id
+                )
+                await asyncio.sleep(delay)

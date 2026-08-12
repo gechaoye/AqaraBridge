@@ -30,6 +30,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         "default": AiotEventEntity,
         "button": AiotButtonEntity,
         "camera": AiotCameraEntity,
+        "lock_event": AiotLockEventEntity,
+        "inside_unlock": AiotLockEventEntity,
+        "fingerprint_unlock": AiotLockEventEntity,
+        "password_unlock": AiotLockEventEntity,
+        "nfc_unlock": AiotLockEventEntity,
+        "temporary_password_unlock": AiotLockEventEntity,
     }
     await manager.async_add_entities(
         config_entry, TYPE, cls_entities, async_add_entities
@@ -80,6 +86,23 @@ class AiotButtonEntity(AiotEntityBase, EventEntity):
             self._trigger_event(trigger)
             self.schedule_update_ha_state()
         return super().convert_res_to_attr(res_name, res_value)
+
+
+class AiotLockEventEntity(AiotEntityBase, EventEntity):
+    """An event emitted by an Aqara smart lock."""
+
+    def __init__(self, hass, device, res_params, channel=None, **kwargs):
+        AiotEntityBase.__init__(self, hass, device, res_params, TYPE, channel, **kwargs)
+        self._attr_event_types = ["triggered"]
+        self._extra_state_attributes.extend(["trigger_time", "trigger_dt"])
+
+    async def async_update(self):
+        """Wait for real-time lock events instead of replaying the latest value."""
+
+    def convert_res_to_attr(self, res_name, res_value):
+        self._trigger_event("triggered", {"value": res_value})
+        self.schedule_update_ha_state()
+        return res_value
 
 
 class AiotCameraEntity(AiotEntityBase, EventEntity):
