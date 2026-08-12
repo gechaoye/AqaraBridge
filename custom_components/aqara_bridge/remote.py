@@ -21,6 +21,25 @@ DATA_KEY = f"{TYPE}.{DOMAIN}"
 _LOGGER = logging.getLogger(__name__)
 
 
+def _extract_ir_keys(response):
+    """Return infrared key records from known Aqara response envelopes."""
+    if isinstance(response, list):
+        return response
+    if not isinstance(response, dict):
+        return []
+
+    keys = response.get("keys")
+    if isinstance(keys, list):
+        return keys
+    for container_name in ("result", "data"):
+        nested = response.get(container_name)
+        if nested is not response:
+            keys = _extract_ir_keys(nested)
+            if keys:
+                return keys
+    return []
+
+
 async def async_setup_entry(hass, config_entry, async_add_entities):
     manager: AiotManager = hass.data[DOMAIN][HASS_DATA_AIOT_MANAGER]
     cls_entities = {
@@ -131,16 +150,22 @@ class AiotCloudIrRemote(AiotEntityBase, RemoteEntity):
         AiotEntityBase.__init__(self, hass, device, res_params, TYPE, **kwargs)
         self._attr_is_on = device.state == 1
         self._commands = {}
-        self._extra_state_attributes.append("commands")
+        self._extra_state_attributes.extend(("commands", "command_ids"))
 
     @property
     def commands(self):
         """Return the command names reported by Aqara Cloud."""
         return sorted(self._commands)
 
+    @property
+    def command_ids(self):
+        """Return the command names and raw Aqara key IDs."""
+        return dict(sorted(self._commands.items()))
+
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
         await self._async_refresh_commands()
+        self.async_write_ha_state()
 
     async def async_update(self):
         """The dedicated infrared API has no resource values to poll."""
@@ -156,12 +181,31 @@ class AiotCloudIrRemote(AiotEntityBase, RemoteEntity):
                 self.device.did,
             )
             return
-        keys = response.get("keys", []) if isinstance(response, dict) else []
-        self._commands = {
-            str(key["keyName"]): str(key["keyId"])
-            for key in keys
-            if isinstance(key, dict) and key.get("keyName") and key.get("keyId")
-        }
+        commands = {}
+        for key in _extract_ir_keys(response):
+            if not isinstance(key, dict):
+                continue
+            key_name = key.get("keyName") or key.get("name")
+            key_id = key.get("keyId")
+            if key_id is None:
+                key_id = key.get("id")
+            if key_name and key_id is not None:
+                commands[str(key_name)] = str(key_id)
+        self._commands = commands
+        if not commands:
+            _LOGGER.warning(
+                "Aqara Cloud returned no infrared commands for remote '%s'; "
+                "response type: %s",
+                self.device.device_name,
+                type(response).__name__,
+            )
+        else:
+            _LOGGER.info(
+                "Loaded %s infrared commands for Aqara remote '%s': %s",
+                len(commands),
+                self.device.device_name,
+                sorted(commands),
+            )
 
     async def async_send_command(self, command, **kwargs):
         """Send commands using their Aqara key name or raw key ID."""

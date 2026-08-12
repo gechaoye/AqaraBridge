@@ -139,6 +139,7 @@ class AiotEntityBase(Entity):
         self._attr_name = device.device_name
         self._position_name = device.position_name
         self._supported_resources = []
+        self._resources_open = True
         if kwargs.get("entity_name"):
             self._attr_name = kwargs.get("entity_name")
 
@@ -313,6 +314,9 @@ class AiotEntityBase(Entity):
         return await self._aiot_manager.session.async_query_resource_name(subjectIds)
 
     async def async_update(self):
+        if not self._resources_open:
+            self._attr_available = False
+            return
         try:
             resp = await self.async_fetch_res_values()
         except Exception:
@@ -916,6 +920,8 @@ class AiotManager:
                             "open resource metadata",
                             instance.unique_id,
                         )
+                        instance._resources_open = False
+                        instance._attr_available = False
                 ch_count = None
                 ch_start = None
                 if j == 0:
@@ -956,15 +962,18 @@ class AiotManager:
                             missing_resource_ids = (
                                 channel_resource_ids - open_resource_ids
                             )
-                            if missing_resource_ids and not is_registered(instance):
-                                _LOGGER.warning(
-                                    "Skipping new channel %s for Aqara model '%s'; "
-                                    "resources are not open to this project: %s",
-                                    channel,
-                                    device.model,
-                                    sorted(missing_resource_ids),
-                                )
-                                continue
+                            if missing_resource_ids:
+                                if not is_registered(instance):
+                                    _LOGGER.warning(
+                                        "Skipping new channel %s for Aqara model '%s'; "
+                                        "resources are not open to this project: %s",
+                                        channel,
+                                        device.model,
+                                        sorted(missing_resource_ids),
+                                    )
+                                    continue
+                                instance._resources_open = False
+                                instance._attr_available = False
                         entities.append(instance)
                 else:
                     if instance is None:
