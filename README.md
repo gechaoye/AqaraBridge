@@ -1,14 +1,16 @@
 # Aqara Bridge for Home Assistant
 
-基于Aqara开放平台，通过云端api进行设备控制以及订阅
+基于 Aqara 开放平台，通过云端 API 进行设备控制和消息订阅。
 
 [![version](https://img.shields.io/github/manifest-json/v/princehaku/AqaraBridge3.0?filename=custom_components%2Faqara_bridge%2Fmanifest.json)](https://github.com/princehaku/AqaraBridge3.0/releases/latest) [![stars](https://img.shields.io/github/stars/princehaku/AqaraBridge3.0)](https://github.com/princehaku/AqaraBridge3.0/stargazers) [![issues](https://img.shields.io/github/issues/princehaku/AqaraBridge3.0)](https://github.com/princehaku/AqaraBridge3.0/issues) [![hacs](https://img.shields.io/badge/HACS-Default-orange.svg)](https://hacs.xyz)
 
 ## 一键添加到HACS
+
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=princehaku&repository=AqaraBridge3.0&category=integration)
+
 ## 需要开发者账号支持
 
-申请AqaraIOT开发者：[Aqara IoT Cloud](https://developer.aqara.com/register).
+需要注册 Aqara 开放平台开发者账号，具体申请方式和最新平台说明请查看 [Aqara 开放平台文档](https://opendoc.aqara.com/)。
 
 * 提示：如果在安装过程中出现此集成不支持通过UI配置，大概率是因为rocketmq的链接库不存在，当前版本仅自动集成了x86和arm64。
 * [V2.1.1]已加入更多架构支持，如果还出现类似问题请复制日志信息提Issue
@@ -16,10 +18,80 @@
 
 重点提示：
 * 需要自己申请aqara的开发者账号。
-* 申请流程1：[注册账号](https://developer.aqara.com/register)，申请通过以后需要选择个人认证，输入姓名和身份证号进行开发者认证。
+* 申请流程1：在 Aqara 开放平台注册账号，申请通过以后需要选择个人认证，输入姓名和身份证号进行开发者认证。
 * 申请流程2：申请通过以后就会有一个DEMO应用，进入项目管理-->详情-->消息推送-->编辑-->选择中国服务、MQ消息推送、消息密钥默认应该只有一个、全订阅-->保存
 * 申请流程3：返回概况，Appid&密钥这个点击展开，找到中国服务，记录appId、appkey（需要点击小眼睛）、keyid，然后将这三个参数填写到插件对应的三个值上。
 * 消息查看：如果需要确认消息可以将这个插件的日志级别改成info可以查看对应消息情况。
+
+开放平台页面和菜单名称可能会调整，请以官方文档显示为准。设备能否创建实体取决于当前开放平台项目实际返回的资源，并非 Aqara Home 中的所有设备和功能都会通过开放接口提供。
+
+## 当前新增设备支持
+
+| 型号 | 设备 | 当前支持 |
+| --- | --- | --- |
+| `lumi.switch.acn034` | 集悦妙控屏 S1 Plus | 三路实体开关、面板设置、功率/用电量，以及开放平台返回的无线按键事件 |
+| `lumi.switch.acn066` | 妙控场景屏 S100 | 三路实体开关 |
+| `aqara.lock.dacn03` | 全自动智能猫眼锁 H100 | 门锁状态、电量，以及室内、指纹、密码、NFC、临时密码等解锁事件 |
+| `virtual.ir.default` | Aqara 虚拟红外遥控器 | 查询云端按键并通过 `remote.send_command` 发送命令 |
+| `virtual.ir.tv` | Aqara 虚拟电视遥控器 | 查询云端按键并通过 `remote.send_command` 发送命令 |
+
+H100、S1 Plus 和 S100 的实体会根据当前开发者项目返回的开放资源逐项创建。表中列出的是集成已实现的能力，不代表每个账号一定会获得全部实体。
+
+### S1 Plus 实体说明
+
+下列四个 `switch` 是面板自身设置，不是灯路，也不是无线开关：
+
+| 实体后缀 | 功能 | Aqara 资源 |
+| --- | --- | --- |
+| `screen_saver` | 待机屏保 | `4.46.85` |
+| `do_not_disturb` | 勿扰模式 | `4.22.85` |
+| `auto_brightness` | 屏幕自动亮度 | `4.14.85` |
+| `key_tone` | 按键提示音 | `4.31.85` |
+
+S1 Plus 还会从 `13.21.85` 至 `13.29.85` 检查最多九路无线按键事件，包含三路物理按键和六路可配置屏幕按键。集成只创建开放平台实际返回的端点，单击事件兼容值 `0` 和 `1`。这些按键在 Home Assistant 中是 `event` 实体，用于触发自动化，不是可控制的 `switch`。
+
+Aqara Home 中配置的灯光编组可能会作为其他灯光实体出现，与 S1 Plus 无线按键实体相互独立。
+
+### 虚拟红外遥控器
+
+虚拟红外 `remote` 实体的 `commands` 属性列出 Aqara 云端返回的可用按键名称。可以按名称发送命令，也可以直接使用原始 key ID：
+
+```yaml
+action: remote.send_command
+target:
+  entity_id: remote.example
+data:
+  command: 电源
+```
+
+### 不创建实体的对象
+
+以下对象可能出现在 Aqara 云端设备列表中，但当前不应创建独立实体：
+
+* `app.group.temperature` 是 Aqara Home 内部的温控设备组，不是独立硬件。请使用组内实际温控设备的实体。
+* `aqara.swe_rob.stcn01` 是第三方授权同步到 Aqara Home 的石头扫地机器人代理。传统资源接口没有返回可控制资源，现有开放能力也不足以提供完整的开始、暂停、回充等控制，建议使用 Home Assistant 官方 Roborock 集成。
+
+## 常见问题
+
+### Aqara 云端返回 429
+
+`429` 表示请求过多（Too Many Requests）。Aqara 官方文档没有公布固定限流时长、QPS、分钟窗口或明确解除时间。
+
+集成会控制请求间隔；收到 429 后按 2、5、10 秒退避重试，并优先采用响应中的 `Retry-After`。重试后仍受限时，集成会通知 Home Assistant 稍后自动重试配置项。设备位置也会使用批量查询以减少请求数量。
+
+限流期间不要连续手动点击“重新加载”。每次重新加载都会再次执行设备发现，可能继续触发限流。建议等待 Home Assistant 自动重试。
+
+### 实体加载失败或停用后无法重新启用
+
+当前版本已调整实体生命周期和 Home Assistant 新版本兼容性处理：
+
+* 事件实体启动时不再读取瞬时事件资源。
+* 初始状态查询失败时，实体会先注册为 `unavailable`，收到后续推送后恢复可用。
+* 已存在于实体注册表的实体不会因为一次资源查询波动而消失。
+* 配置项重载时会卸载平台、停止 MQ，并清理旧的实体对象和消息分发关系。
+* 集成只向实际加入 Home Assistant 的实体分发消息，并使用正确的实体平台域，避免新版本的实体 ID 域警告。
+
+更新到包含上述修复的版本后，建议完整重启一次 Home Assistant，再重新启用此前停用的实体。
 
 ## 版本修订
 当前版本 V3.0.0，为 AqaraBridge3.0 的首个版本。
@@ -32,6 +104,10 @@ V3.0.0
 * 优化选项配置页，自动回填国家/地区和当前刷新令牌；可直接刷新授权，或清空刷新令牌后使用验证码重新授权。
 * 新增 `lumi.sensor_ht.agl001` 温度、湿度和电量传感器支持。
 * 兼容 `environment_temperature`、`environment_humidity` 资源及小数形式的温湿度和电量数据。
+* 新增 S1 Plus、S100、H100 和 Aqara 虚拟红外遥控器支持；S1 Plus 支持开放平台返回的无线按键事件。
+* 改进实体初始加载、停用后重新启用、配置项重载和 Home Assistant 新版本实体域兼容性。
+* 增加 Aqara 云端 429 限流退避、`Retry-After` 处理和 Home Assistant 自动重试，并减少设备发现阶段的重复请求。
+* 识别 Aqara Home 温控设备组和第三方授权的石头扫地机器人代理，避免将无法控制的云端对象误报为普通设备。
 
 V2.1.2
 * 优化初始化向导提示
