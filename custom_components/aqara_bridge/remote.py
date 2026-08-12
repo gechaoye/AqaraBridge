@@ -6,7 +6,8 @@ from homeassistant.components.remote import (
     ATTR_DELAY_SECS,
     ATTR_NUM_REPEATS,
     DEFAULT_DELAY_SECS,
-    RemoteEntity
+    RemoteEntity,
+    RemoteEntityFeature,
 )
 from homeassistant.const import CONF_TIMEOUT
 
@@ -34,6 +35,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 
 class AiotRemoteEntity(AiotEntityBase, RemoteEntity):
+    _attr_supported_features = RemoteEntityFeature(0)
+
     def __init__(self, hass, device, res_params, **kwargs):
         AiotEntityBase.__init__(
             self, hass, device, res_params, TYPE, **kwargs
@@ -54,6 +57,8 @@ class AiotRemoteEntity(AiotEntityBase, RemoteEntity):
 
 
 class AiotRemotePair(AiotEntityBase, RemoteEntity):
+    _attr_supported_features = RemoteEntityFeature(0)
+
     def __init__(self, hass, device, res_params, **kwargs):
         AiotEntityBase.__init__(
             self, hass, device, res_params, TYPE, **kwargs
@@ -68,6 +73,8 @@ class AiotRemotePair(AiotEntityBase, RemoteEntity):
 
 
 class AiotRemoteIrda(AiotEntityBase, RemoteEntity):
+    _attr_supported_features = RemoteEntityFeature.LEARN_COMMAND
+
     def __init__(self, hass, device, res_params, **kwargs):
         AiotEntityBase.__init__(
             self, hass, device, res_params, TYPE, **kwargs
@@ -117,6 +124,8 @@ class AiotRemoteIrda(AiotEntityBase, RemoteEntity):
 
 class AiotCloudIrRemote(AiotEntityBase, RemoteEntity):
     """Aqara cloud infrared remote backed by the dedicated IR API."""
+
+    _attr_supported_features = RemoteEntityFeature(0)
 
     def __init__(self, hass, device, res_params, **kwargs):
         AiotEntityBase.__init__(self, hass, device, res_params, TYPE, **kwargs)
